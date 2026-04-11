@@ -831,6 +831,50 @@ function renderIndiaMap(stateData, container) {
     });
 
     svg.appendChild(pathEl);
+
+    // ── STATE LABEL ──
+    const centroid = path.centroid(feature);
+    if (centroid && !isNaN(centroid[0]) && !isNaN(centroid[1])) {
+      const labelGroup = document.createElementNS(svgNS, 'g');
+      labelGroup.style.pointerEvents = 'none';
+
+      // State name (short — first word only for small states)
+      const words = stateName.split(' ');
+      const shortName = words.length > 2 ? words.slice(0,2).join(' ') : stateName;
+
+      const nameText = document.createElementNS(svgNS, 'text');
+      nameText.setAttribute('x', centroid[0]);
+      nameText.setAttribute('y', centroid[1] - 4);
+      nameText.setAttribute('text-anchor', 'middle');
+      nameText.setAttribute('font-size', '6');
+      nameText.setAttribute('font-weight', '700');
+      nameText.setAttribute('fill', count > maxVal * 0.5 ? '#fff' : '#1e3a5f');
+      nameText.setAttribute('paint-order', 'stroke');
+      nameText.setAttribute('stroke', count > maxVal * 0.5 ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.8)');
+      nameText.setAttribute('stroke-width', '2');
+      nameText.setAttribute('stroke-linejoin', 'round');
+      nameText.textContent = shortName;
+      labelGroup.appendChild(nameText);
+
+      // Count below
+      if (count > 0) {
+        const countText = document.createElementNS(svgNS, 'text');
+        countText.setAttribute('x', centroid[0]);
+        countText.setAttribute('y', centroid[1] + 6);
+        countText.setAttribute('text-anchor', 'middle');
+        countText.setAttribute('font-size', '5.5');
+        countText.setAttribute('font-weight', '600');
+        countText.setAttribute('fill', count > maxVal * 0.5 ? 'rgba(255,255,255,0.85)' : '#2563eb');
+        countText.setAttribute('paint-order', 'stroke');
+        countText.setAttribute('stroke', count > maxVal * 0.5 ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.9)');
+        countText.setAttribute('stroke-width', '2');
+        countText.setAttribute('stroke-linejoin', 'round');
+        countText.textContent = count.toLocaleString();
+        labelGroup.appendChild(countText);
+      }
+
+      svg.appendChild(labelGroup);
+    }
   });
 
   // Legend gradient (inline SVG linearGradient)
