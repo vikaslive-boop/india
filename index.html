@@ -619,15 +619,17 @@ async function loadAndRenderWorldMap(countryData){
 
 function renderWorldMap(countryData,container){
   const sorted=Object.entries(countryData).sort((a,b)=>b[1]-a[1]);
-  const maxVal=sorted.length?sorted[0][1]:1, minVal=sorted.length?sorted[sorted.length-1][1]:0;
-  const colorScale=d3.scaleSequential().domain([0,maxVal]).interpolator(d3.interpolate('#fecaca','#991b1b'));
-  const noDataColor='#f1f5f9';
+  const maxVal=sorted.length?sorted[0][1]:1;
+  const top1Name=sorted.length?sorted[0][0]:'';
 
-  // Lookup: lowercase → our key
+  // 5-stop cinematic red ramp: near-black ocean → blood red for top
+  const colorScale=d3.scaleSequential().domain([0,maxVal])
+    .interpolator(t=>t===0?'#1e2130':d3.interpolateRgb('#3d1515','#ff2222')(t));
+  const noDataColor='#252a3a'; // dark ocean/land for no-data
+
   const dataLookup={};
   Object.keys(countryData).forEach(k=>{ dataLookup[k.toLowerCase()]=k; });
 
-  // World GeoJSON name aliases
   const aliases={
     'russia':'Russia','russian federation':'Russia',
     'united states of america':'USA','united states':'USA',
@@ -641,18 +643,45 @@ function renderWorldMap(countryData,container){
     'united arab emirates':'UAE','syrian arab republic':'Syria',
   };
 
-  // Only label top 8 countries by count
-  const top8Names=new Set(sorted.slice(0,8).map(([c])=>c.toLowerCase()));
+  const top5Names=new Set(sorted.slice(0,5).map(([c])=>c.toLowerCase()));
 
-  const NS='http://www.w3.org/2000/svg', W=1200, H=580;
-  const proj=d3.geoNaturalEarth1().scale(185).translate([W/2,H/2+10]);
+  const NS='http://www.w3.org/2000/svg', W=1200, H=600;
+  // Shift projection left to center Eurasia (where the data is)
+  const proj=d3.geoNaturalEarth1().scale(200).translate([W*0.46, H/2+20]);
   const path=d3.geoPath().projection(proj);
   const tip=document.getElementById('mapTooltip');
 
   const svg=document.createElementNS(NS,'svg');
-  svg.setAttribute('class','world-map-svg'); svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.setAttribute('class','world-map-svg');
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.style.borderRadius='12px';
+  svg.style.display='block';
 
-  // Store features with their data for label pass
+  // ── Dark ocean background ──
+  const bg=document.createElementNS(NS,'rect');
+  bg.setAttribute('width',W); bg.setAttribute('height',H);
+  bg.setAttribute('fill','#141824');
+  bg.setAttribute('rx','12');
+  svg.appendChild(bg);
+
+  // ── Defs: glow filter for top countries ──
+  const defs=document.createElementNS(NS,'defs');
+  defs.innerHTML=`
+    <filter id="glow-strong" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="pulseGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff4444" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#ff4444" stop-opacity="0"/>
+    </radialGradient>
+  `;
+  svg.appendChild(defs);
+
   const featuresWithData=[];
 
   worldGeoJSON.features.forEach(feature=>{
@@ -660,13 +689,18 @@ function renderWorldMap(countryData,container){
     const aliased=aliases[rawName.toLowerCase()]||rawName;
     const dataKey=dataLookup[aliased.toLowerCase()]||null;
     const count=dataKey?(countryData[dataKey]||0):0;
+    const isTop5=count>0&&top5Names.has(aliased.toLowerCase());
+    const isTop1=aliased===top1Name;
 
     const pathEl=document.createElementNS(NS,'path');
     pathEl.setAttribute('d',path(feature)||'');
-    pathEl.setAttribute('fill',count>0?colorScale(count):noDataColor);
-    pathEl.setAttribute('stroke','#fff');
-    pathEl.setAttribute('stroke-width','0.4');
+    pathEl.setAttribute('fill',count>0?colorScale(count/maxVal):noDataColor);
+    pathEl.setAttribute('stroke', count>0?'rgba(255,100,100,0.25)':'rgba(255,255,255,0.04)');
+    pathEl.setAttribute('stroke-width', isTop5?'0.8':'0.3');
     pathEl.style.cursor='pointer';
+    pathEl.style.transition='opacity 0.2s';
+    if(isTop5) pathEl.setAttribute('filter','url(#glow-soft)');
+    if(isTop1) pathEl.setAttribute('filter','url(#glow-strong)');
 
     pathEl.addEventListener('mousemove',e=>{
       tip.className='map-tooltip fmge-tip'; tip.style.display='block';
@@ -674,86 +708,126 @@ function renderWorldMap(countryData,container){
       document.getElementById('ttState').textContent=aliased;
       document.getElementById('ttCount').textContent=count>0?`${count.toLocaleString()} sign-ups`:'No data';
     });
-    pathEl.addEventListener('mouseenter',()=>{ if(count>0) pathEl.style.opacity='0.75'; });
+    pathEl.addEventListener('mouseenter',()=>{ if(count>0) pathEl.style.opacity='0.7'; });
     pathEl.addEventListener('mouseleave',()=>{ pathEl.style.opacity='1'; tip.style.display='none'; tip.className='map-tooltip'; });
     svg.appendChild(pathEl);
 
-    if(count>0){
-      featuresWithData.push({feature, aliased, count});
-    }
+    if(count>0) featuresWithData.push({feature, aliased, count, isTop1});
   });
 
-  // ── ADD COUNTRY LABELS — top 8 countries only ──
-  featuresWithData.forEach(({feature, aliased, count})=>{
-    // Only label if this country is in top 8
-    if(!top8Names.has(aliased.toLowerCase())) return;
-
+  // ── Pill badge labels — top 5 only ──
+  featuresWithData.forEach(({feature, aliased, count, isTop1})=>{
+    if(!top5Names.has(aliased.toLowerCase())) return;
     const centroid=path.centroid(feature);
     if(!centroid||isNaN(centroid[0])||isNaN(centroid[1])) return;
 
-    const isDark=count>maxVal*0.45;
-    const textFill=isDark?'#fff':'#7f1d1d';
-    const strokeFill=isDark?'rgba(0,0,0,0.3)':'rgba(255,255,255,0.9)';
+    const words=aliased.split(' ');
+    const label=words.length>2?words.slice(0,2).join(' '):aliased;
+    const countStr=count.toLocaleString();
+
+    // Pill dimensions
+    const pillW=Math.max(label.length*6+countStr.length*6+28, 80);
+    const pillH=22;
+    const px=centroid[0]-pillW/2;
+    const py=centroid[1]-pillH/2;
 
     const g=document.createElementNS(NS,'g');
     g.style.pointerEvents='none';
 
-    // Country name — abbreviated if long
-    const words=aliased.split(' ');
-    const label=words.length>2?words.slice(0,2).join(' '):aliased;
+    // Animated pulse ring for #1
+    if(isTop1){
+      const pulse=document.createElementNS(NS,'ellipse');
+      pulse.setAttribute('cx',centroid[0]); pulse.setAttribute('cy',centroid[1]);
+      pulse.setAttribute('rx','60'); pulse.setAttribute('ry','30');
+      pulse.setAttribute('fill','url(#pulseGrad)');
+      pulse.style.animation='worldPulse 2s ease-out infinite';
+      g.appendChild(pulse);
+    }
 
+    // Pill background
+    const pill=document.createElementNS(NS,'rect');
+    pill.setAttribute('x',px); pill.setAttribute('y',py);
+    pill.setAttribute('width',pillW); pill.setAttribute('height',pillH);
+    pill.setAttribute('rx','11');
+    pill.setAttribute('fill', isTop1?'rgba(220,20,20,0.92)':'rgba(30,10,10,0.78)');
+    pill.setAttribute('stroke', isTop1?'#ff6666':'rgba(255,100,100,0.5)');
+    pill.setAttribute('stroke-width','0.8');
+    g.appendChild(pill);
+
+    // Rank dot
+    const dot=document.createElementNS(NS,'circle');
+    dot.setAttribute('cx',px+10); dot.setAttribute('cy',centroid[1]);
+    dot.setAttribute('r','3.5');
+    dot.setAttribute('fill', isTop1?'#fff':'#ff8888');
+    g.appendChild(dot);
+
+    // Country name
     const t1=document.createElementNS(NS,'text');
-    t1.setAttribute('x', centroid[0]);
-    t1.setAttribute('y', centroid[1]-3);
-    t1.setAttribute('text-anchor','middle');
-    t1.setAttribute('font-size','7');
+    t1.setAttribute('x', px+19);
+    t1.setAttribute('y', centroid[1]-1);
+    t1.setAttribute('dominant-baseline','middle');
+    t1.setAttribute('font-size','7.5');
     t1.setAttribute('font-weight','700');
-    t1.setAttribute('fill', textFill);
-    t1.setAttribute('paint-order','stroke');
-    t1.setAttribute('stroke', strokeFill);
-    t1.setAttribute('stroke-width','2.5');
-    t1.setAttribute('stroke-linejoin','round');
+    t1.setAttribute('fill','#fff');
     t1.textContent=label;
     g.appendChild(t1);
 
-    // Count below
+    // Divider
+    const nameW=label.length*5.2;
+    const div=document.createElementNS(NS,'line');
+    div.setAttribute('x1',px+20+nameW); div.setAttribute('y1',py+4);
+    div.setAttribute('x2',px+20+nameW); div.setAttribute('y2',py+pillH-4);
+    div.setAttribute('stroke','rgba(255,150,150,0.4)'); div.setAttribute('stroke-width','0.8');
+    g.appendChild(div);
+
+    // Count
     const t2=document.createElementNS(NS,'text');
-    t2.setAttribute('x', centroid[0]);
-    t2.setAttribute('y', centroid[1]+7);
-    t2.setAttribute('text-anchor','middle');
-    t2.setAttribute('font-size','6.5');
+    t2.setAttribute('x', px+24+nameW);
+    t2.setAttribute('y', centroid[1]-1);
+    t2.setAttribute('dominant-baseline','middle');
+    t2.setAttribute('font-size','7');
     t2.setAttribute('font-weight','600');
-    t2.setAttribute('fill', isDark?'rgba(255,220,220,0.95)':'#991b1b');
-    t2.setAttribute('paint-order','stroke');
-    t2.setAttribute('stroke', strokeFill);
-    t2.setAttribute('stroke-width','2');
-    t2.setAttribute('stroke-linejoin','round');
-    t2.textContent=count.toLocaleString();
+    t2.setAttribute('fill', isTop1?'#ffd0d0':'#ffaaaa');
+    t2.textContent=countStr;
     g.appendChild(t2);
 
     svg.appendChild(g);
   });
 
-  const listItems=sorted.slice(0,40).map(([c,n],i)=>`
-    <div class="state-row"><div class="state-row-left">
-      <span class="state-rank">${i+1}</span>
-      <span class="state-dot" style="background:${colorScale(n)}"></span>
-      <span class="state-name">${c}</span>
-    </div><span class="state-count">${n.toLocaleString()}</span></div>`).join('');
+  // Inject pulse keyframe once
+  if(!document.getElementById('worldPulseStyle')){
+    const st=document.createElement('style');
+    st.id='worldPulseStyle';
+    st.textContent='@keyframes worldPulse{0%{opacity:0.8;transform:scale(1)}70%{opacity:0}100%{opacity:0;transform:scale(2.2)}}';
+    document.head.appendChild(st);
+  }
+
+  // ── Bottom ranked list — compact dark chips ──
+  const listItems=sorted.slice(0,30).map(([c,n],i)=>{
+    const pct=Math.round(n/maxVal*100);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:#1e2130;border:1px solid rgba(255,100,100,0.12);transition:background 0.15s;" onmouseenter="this.style.background='#2a1a1a'" onmouseleave="this.style.background='#1e2130'">
+      <span style="font-size:10px;color:#666;width:16px;text-align:right;flex-shrink:0">${i+1}</span>
+      <span style="width:28px;height:4px;border-radius:2px;background:${colorScale((n/maxVal))};flex-shrink:0;box-shadow:0 0 4px ${colorScale(n/maxVal)}88"></span>
+      <span style="font-size:12px;color:#e2e8f0;font-weight:500;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c}</span>
+      <span style="font-size:12px;color:#ff8888;font-weight:700">${n.toLocaleString()}</span>
+    </div>`;
+  }).join('');
 
   container.innerHTML=`
-    <div class="map-container-world">
+    <div style="background:#141824;border-radius:16px;overflow:hidden;border:1px solid rgba(255,100,100,0.15);">
       <div id="mapSvgWrapper"></div>
-      <div class="world-legend-below">
-        <div class="world-legend-header">
-          <div class="map-legend-title" style="margin:0">🌍 FMGE sign-ups by country</div>
-          <div class="world-legend-scale-wrap">
-            <span style="font-size:11px;color:#94a3b8">${minVal.toLocaleString()}</span>
-            <div class="world-legend-scale-bar"></div>
-            <span style="font-size:11px;color:#94a3b8">${maxVal.toLocaleString()}</span>
+      <div style="padding:16px 20px 20px;border-top:1px solid rgba(255,100,100,0.1);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:12px;font-weight:700;color:#ff8888;letter-spacing:0.5px;text-transform:uppercase;">🌍 FMGE sign-ups by country</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:#555">1</span>
+            <div style="width:160px;height:6px;border-radius:3px;background:linear-gradient(to right,#3d1515,#ff2222);box-shadow:0 0 8px #ff222244"></div>
+            <span style="font-size:11px;color:#ff8888;font-weight:600">${maxVal.toLocaleString()}</span>
           </div>
         </div>
-        <div class="world-country-grid">${listItems||'<div class="map-no-data">No country data</div>'}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;">
+          ${listItems||'<div style="color:#555;font-size:12px;padding:8px">No data</div>'}
+        </div>
       </div>
     </div>`;
   document.getElementById('mapSvgWrapper').appendChild(svg);
@@ -828,8 +902,8 @@ function renderDashboard(){
           <div class="chart-sub">Sign Ups only · Jan 2025 onwards · Hover to see counts · Labels on both maps</div>
         </div>
         <div class="map-tabs">
-          <button id="btnMapIndia" class="map-tab ${activeMapTab==='india'?'active-india':''}" onclick="switchMapTab('india')">🇮🇳 India </button>
-          <button id="btnMapFmge"  class="map-tab ${activeMapTab==='fmge'?'active-fmge':''}"  onclick="switchMapTab('fmge')">🌍 FMGE </button>
+          <button id="btnMapIndia" class="map-tab ${activeMapTab==='india'?'active-india':''}" onclick="switchMapTab('india')">🇮🇳 India (States)</button>
+          <button id="btnMapFmge"  class="map-tab ${activeMapTab==='fmge'?'active-fmge':''}"  onclick="switchMapTab('fmge')">🌍 FMGE (Countries)</button>
         </div>
         <div id="mapSvgArea" style="min-height:200px"></div>
       </div>
