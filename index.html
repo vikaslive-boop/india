@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sign Ups & Sign Ins Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f6f8; color: #1a1a2e; min-height: 100vh; }
+
+  #loginPage {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  }
+  .login-card {
+    background: #fff; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 420px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.10); text-align: center;
+  }
+  .login-logo { font-size: 22px; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+  .login-logo span { color: #2563eb; }
+  .login-sub { font-size: 14px; color: #64748b; margin-bottom: 36px; }
+  .btn-google {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    width: 100%; padding: 14px 20px; border-radius: 12px;
+    border: 2px solid #e2e8f0; background: #fff; cursor: pointer;
+    font-size: 15px; font-weight: 600; color: #1a1a2e;
+    transition: all 0.2s; text-decoration: none;
+  }
+  .btn-google:hover { border-color: #2563eb; background: #eff6ff; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(37,99,235,0.15); }
+  .btn-google img { width: 22px; height: 22px; }
+  .login-note { font-size: 12px; color: #94a3b8; margin-top: 20px; }
+
+  #pendingPage {
+    min-height: 100vh; display: none; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  }
+  .pending-card {
+    background: #fff; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 420px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.10); text-align: center;
+  }
+  .pending-icon { font-size: 48px; margin-bottom: 16px; }
+  .pending-title { font-size: 20px; font-weight: 700; color: #1a1a2e; margin-bottom: 10px; }
+  .pending-sub { font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 24px; }
+  .btn-signout {
+    padding: 10px 24px; border-radius: 10px; border: 1px solid #e2e8f0;
+    background: #fff; color: #64748b; font-size: 13px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-signout:hover { border-color: #ef4444; color: #ef4444; background: #fef2f2; }
+
+  #dashboardPage { display: none; }
+
+  header {
+    background: #fff; border-bottom: 1px solid #e8eaed;
+    padding: 16px 32px; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-size: 17px; font-weight: 600; color: #1a1a2e; letter-spacing: -0.3px; }
+  .logo span { color: #2563eb; }
+  .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .live-badge { font-size: 11px; font-weight: 500; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 20px; display: flex; align-items: center; gap: 5px; }
+  .live-dot { width: 6px; height: 6px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .last-updated { font-size: 12px; color: #94a3b8; }
+  .user-info { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #64748b; }
+  .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: #eff6ff; border: 2px solid #bfdbfe; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #2563eb; overflow: hidden; }
+  .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .btn-logout { font-size: 12px; padding: 5px 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; color: #64748b; cursor: pointer; transition: all 0.2s; }
+  .btn-logout:hover { border-color: #ef4444; color: #ef4444; }
+
+  .main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+
+  .filter-bar {
+    background: #fff; border: 1px solid #e8eaed; border-radius: 12px;
+    padding: 16px 20px; margin-bottom: 12px;
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 5px; }
+  .filter-group label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+  .filter-group select,
+  .filter-group input[type="date"] {
+    font-size: 13px; padding: 7px 12px; border-radius: 8px;
+    border: 1px solid #e2e8f0; background: #fff; color: #1a1a2e;
+    cursor: pointer; outline: none; transition: border-color 0.2s; height: 36px;
+  }
+  .filter-group select:hover, .filter-group select:focus,
+  .filter-group input[type="date"]:hover, .filter-group input[type="date"]:focus { border-color: #2563eb; }
+  .date-range { display: flex; align-items: center; gap: 8px; }
+  .date-range span { font-size: 12px; color: #94a3b8; }
+  .filter-divider { width: 1px; height: 36px; background: #e2e8f0; align-self: flex-end; }
+
+  .btn-clear {
+    height: 36px; padding: 0 16px; border-radius: 8px;
+    border: 1px solid #e2e8f0; background: #fff; color: #64748b;
+    font-size: 13px; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; gap: 6px; align-self: flex-end;
+  }
+  .btn-clear:hover { border-color: #ef4444; color: #ef4444; background: #fef2f2; }
+
+  .active-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; min-height: 4px; }
+  .filter-tag {
+    font-size: 12px; padding: 4px 10px; background: #eff6ff; color: #2563eb;
+    border: 1px solid #bfdbfe; border-radius: 20px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .filter-tag button { background: none; border: none; cursor: pointer; color: #93c5fd; font-size: 15px; line-height: 1; padding: 0; }
+  .filter-tag button:hover { color: #2563eb; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .metric-card { background: #fff; border-radius: 12px; padding: 18px 20px; border: 1px solid #e8eaed; }
+  .metric-card .m-label { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .metric-card .m-value { font-size: 28px; font-weight: 700; color: #1a1a2e; line-height: 1; margin-bottom: 4px; }
+  .metric-card .m-sub { font-size: 12px; color: #64748b; }
+  .metric-card.blue  { border-top: 3px solid #5e8cee; }
+  .metric-card.green { border-top: 3px solid #10b981; }
+  .metric-card.amber { border-top: 3px solid #f59e0b; }
+  .metric-card.slate { border-top: 3px solid #64748b; }
+
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .chart-card { background: #fff; border-radius: 12px; padding: 22px; border: 1px solid #e8eaed; }
+  .chart-card.full { grid-column: 1 / -1; }
+  .chart-header { margin-bottom: 16px; }
+  .chart-title { font-size: 14px; font-weight: 600; color: #1a1a2e; margin-bottom: 3px; }
+  .chart-sub { font-size: 12px; color: #94a3b8; }
+  .legend { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; }
+  .legend-sq { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* ── INDIA MAP STYLES ── */
+  .map-container {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 20px;
+    align-items: start;
+  }
+  #indiaMapSvg {
+    width: 100%;
+    height: 520px;
+  }
+  #indiaMapSvg path {
+    stroke: #fff;
+    stroke-width: 0.8;
+    cursor: pointer;
+    transition: opacity 0.15s, stroke-width 0.15s;
+  }
+  #indiaMapSvg path:hover {
+    stroke-width: 2;
+    stroke: #1a1a2e;
+    opacity: 0.85;
+  }
+  .map-tooltip {
+    position: fixed;
+    background: rgba(15,23,42,0.95);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 9999;
+    display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    backdrop-filter: blur(4px);
+    min-width: 160px;
+  }
+  .map-tooltip .tt-state { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .map-tooltip .tt-count { color: #93c5fd; font-size: 13px; }
+
+  .map-legend-panel { padding: 4px 0; }
+  .map-legend-title { font-size: 12px; font-weight: 700; color: #1a1a2e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .map-color-scale {
+    width: 100%;
+    height: 14px;
+    border-radius: 7px;
+    margin-bottom: 6px;
+    background: linear-gradient(to right, #dbeafe, #1d4ed8);
+  }
+  .map-scale-labels { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-bottom: 20px; }
+
+  .state-list { max-height: 380px; overflow-y: auto; }
+  .state-list::-webkit-scrollbar { width: 4px; }
+  .state-list::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+  .state-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+  .state-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 8px; border-radius: 6px; margin-bottom: 2px;
+    transition: background 0.15s; cursor: default;
+    font-size: 12px;
+  }
+  .state-row:hover { background: #f1f5f9; }
+  .state-row-left { display: flex; align-items: center; gap: 8px; }
+  .state-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .state-name { color: #374151; font-weight: 500; }
+  .state-count { color: #64748b; font-weight: 600; font-size: 12px; }
+  .state-rank { font-size: 10px; color: #94a3b8; width: 18px; text-align: right; }
+
+  .map-no-data { font-size: 12px; color: #94a3b8; font-style: italic; }
+
+  .loading-state { text-align: center; padding: 80px 20px; color: #94a3b8; }
+  .loading-state .spinner { width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-state { text-align: center; padding: 60px 20px; color: #ef4444; }
+
+  @media (max-width: 900px) {
+    .map-container { grid-template-columns: 1fr; }
+    #indiaMapSvg { height: 380px; }
+    .state-list { max-height: 240px; }
+  }
+  @media (max-width: 700px) {
+    .main { padding: 16px; }
+    header { padding: 14px 16px; }
+    .charts-grid { grid-template-columns: 1fr; }
+    .filter-bar { gap: 12px; }
+    .login-card, .pending-card { padding: 36px 24px; margin: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN PAGE -->
+<div id="loginPage" style="display:none;">
+  <div class="login-card">
+    <div class="login-logo">Activity <span>Dashboard</span></div>
+    <div class="login-sub">Sign in to access the dashboard</div>
+    <button class="btn-google" onclick="signInWithGoogle()">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google"/>
+      Continue with Google
+    </button>
+    <div class="login-note">Only authorised members can access this dashboard.</div>
+  </div>
+</div>
+
+<!-- PENDING APPROVAL PAGE -->
+<div id="pendingPage" style="display:none; min-height:100vh; align-items:center; justify-content:center; background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);">
+  <div class="pending-card">
+    <div class="pending-icon">⏳</div>
+    <div class="pending-title">Access Requested</div>
+    <div class="pending-sub">Your request has been sent to the admin for approval.<br>You'll get access once it's approved. Please check back later.</div>
+    <button class="btn-signout" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<!-- DASHBOARD PAGE -->
+<div id="dashboardPage" style="display:none;">
+  <header>
+    <div class="logo">Activity <span>Dashboard</span></div>
+    <div class="header-right">
+      <span class="last-updated" id="lastUpdated">Fetching data…</span>
+      <span class="live-badge"><span class="live-dot"></span> Live · Auto-refresh 60s</span>
+      <div class="user-info">
+        <div class="user-avatar" id="userAvatar"></div>
+        <span id="userEmail"></span>
+      </div>
+      <button class="btn-logout" onclick="signOut()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label>Year</label>
+        <select id="yearSel"><option value="all">All years</option></select>
+      </div>
+      <div class="filter-group">
+        <label>Month</label>
+        <select id="monthSel"><option value="all">All months</option></select>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>Date range</label>
+        <div class="date-range">
+          <input type="date" id="dateFrom" />
+          <span>to</span>
+          <input type="date" id="dateTo" />
+        </div>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>Type</label>
+        <select id="typeSel">
+          <option value="all">Sign Ups + Sign Ins</option>
+          <option value="signup">Sign Ups only</option>
+          <option value="signin">Sign Ins only</option>
+        </select>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>View by</label>
+        <select id="viewSel">
+          <option value="monthly">Monthly</option>
+          <option value="weekly">Weekly</option>
+          <option value="daily">Daily</option>
+        </select>
+      </div>
+      <button class="btn-clear" onclick="clearAllFilters()">✕ Clear all filters</button>
+    </div>
+
+    <div class="active-filters" id="activeTags"></div>
+
+    <div id="appContent">
+      <div class="loading-state">
+        <div class="spinner"></div>
+        Loading data…
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MAP TOOLTIP -->
+<div class="map-tooltip" id="mapTooltip">
+  <div class="tt-state" id="ttState"></div>
+  <div class="tt-count" id="ttCount"></div>
+</div>
+
+<script>
+// ── SUPABASE SETUP ──
+const SUPABASE_URL  = 'https://gbodnshovsgaisfvxjnz.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdib2Ruc2hvdnNnYWlzZnZ4am56Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2NTkzNDYsImV4cCI6MjA5MTIzNTM0Nn0.amG5NTp9619o-246N8S4DZU50WmxwaadOtNvbHBr0z4';
+const ADMIN_EMAILS  = ['vikas.singh@dbmci.one', 'daniel.paul@egurukulapp.com'];
+
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: {
+    detectSessionInUrl: true,
+    persistSession: true,
+    autoRefreshToken: true,
+    flowType: 'implicit',
+    storage: localStorage
+  }
+});
+
+async function signInWithGoogle() {
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { 
+      redirectTo: window.location.origin + window.location.pathname,
+      skipBrowserRedirect: false
+    }
+  });
+  if (error) alert('Login failed: ' + error.message);
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  showPage('login');
+}
+
+async function checkAccess(email) {
+  const { data, error } = await sb
+    .from('approved_emails')
+    .select('approved')
+    .eq('email', email)
+    .single();
+  if (error || !data) return false;
+  return data.approved === true;
+}
+
+async function requestAccess(user) {
+  const { data: existing } = await sb
+    .from('approved_emails')
+    .select('email')
+    .eq('email', user.email)
+    .single();
+  if (!existing) {
+    await sb.from('approved_emails').insert({ email: user.email, approved: false });
+  }
+  await notifyAdmins(user);
+}
+
+async function notifyAdmins(user) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON}` },
+      body: JSON.stringify({ requesterEmail: user.email, requesterName: user.user_metadata?.full_name || user.email })
+    });
+    const data = await res.json();
+    console.log('Notification result:', data);
+  } catch(e) { console.error('Notification error:', e); }
+}
+
+function showPage(page) {
+  document.getElementById('loginPage').style.display     = page === 'login'     ? 'flex'  : 'none';
+  document.getElementById('pendingPage').style.display   = page === 'pending'   ? 'flex'  : 'none';
+  document.getElementById('dashboardPage').style.display = page === 'dashboard' ? 'block' : 'none';
+}
+
+async function initAuth() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { showPage('login'); return; }
+  const user  = session.user;
+  const email = user.email;
+  const allowed = await checkAccess(email);
+  if (allowed) {
+    showPage('dashboard');
+    const avatarEl = document.getElementById('userAvatar');
+    const avatar = user.user_metadata?.avatar_url;
+    if (avatar) avatarEl.innerHTML = `<img src="${avatar}" alt="avatar"/>`;
+    else avatarEl.textContent = email[0].toUpperCase();
+    document.getElementById('userEmail').textContent = email;
+    attachListeners();
+    fetchData();
+    setInterval(fetchData, 60000);
+  } else {
+    await requestAccess(user);
+    showPage('pending');
+  }
+}
+
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (!authStateListenerReady) return;
+  if (event === 'SIGNED_IN' && session && !authHandled) {
+    authHandled = true;
+    window.history.replaceState(null, '', window.location.pathname);
+    await initAuth();
+  } else if (event === 'TOKEN_REFRESHED') {
+    // maintained
+  } else if (event === 'SIGNED_OUT') {
+    authHandled = false;
+    showPage('login');
+  }
+});
+
+let bootComplete = false;
+let authStateListenerReady = false;
+let authHandled = false;
+
+async function bootApp() {
+  if (bootComplete) return;
+  bootComplete = true;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const { data: { session }, error } = await sb.auth.getSession();
+    if (error) { showPage('login'); return; }
+    if (session && !authHandled) { authHandled = true; await initAuth(); }
+    else if (!session) { showPage('login'); }
+    authStateListenerReady = true;
+  } catch (err) { showPage('login'); }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}
+
+// ── DASHBOARD LOGIC ──
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR_-2XkH8w9vaODhrkjtkMI-qA1oefVdRTG4go9l3jV3xKoQR2tLXAQvBfybQhiK2ThzXx-zDCjN4ff/pub?gid=0&single=true&output=csv';
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let allRows = [];
+let chartInstances = {};
+let indiaGeoJSON = null;
+
+// State name normalization map — handles common variations in data
+const STATE_NAME_MAP = {
+  'andaman & nicobar islands': 'Andaman & Nicobar Islands',
+  'andaman and nicobar': 'Andaman & Nicobar Islands',
+  'andaman and nicobar islands': 'Andaman & Nicobar Islands',
+  'andhra pradesh': 'Andhra Pradesh',
+  'arunachal pradesh': 'Arunachal Pradesh',
+  'assam': 'Assam',
+  'bihar': 'Bihar',
+  'chandigarh': 'Chandigarh',
+  'chhattisgarh': 'Chhattisgarh',
+  'chattisgarh': 'Chhattisgarh',
+  'dadra and nagar haveli': 'Dadra & Nagar Haveli',
+  'dadra & nagar haveli': 'Dadra & Nagar Haveli',
+  'dadra and nagar haveli and daman and diu': 'Dadra & Nagar Haveli',
+  'daman and diu': 'Daman & Diu',
+  'daman & diu': 'Daman & Diu',
+  'delhi': 'Delhi',
+  'new delhi': 'Delhi',
+  'goa': 'Goa',
+  'gujarat': 'Gujarat',
+  'haryana': 'Haryana',
+  'himachal pradesh': 'Himachal Pradesh',
+  'jammu & kashmir': 'Jammu & Kashmir',
+  'jammu and kashmir': 'Jammu & Kashmir',
+  'jharkhand': 'Jharkhand',
+  'karnataka': 'Karnataka',
+  'kerala': 'Kerala',
+  'ladakh': 'Ladakh',
+  'lakshadweep': 'Lakshadweep',
+  'madhya pradesh': 'Madhya Pradesh',
+  'maharashtra': 'Maharashtra',
+  'manipur': 'Manipur',
+  'meghalaya': 'Meghalaya',
+  'mizoram': 'Mizoram',
+  'nagaland': 'Nagaland',
+  'odisha': 'Odisha',
+  'orissa': 'Odisha',
+  'puducherry': 'Pondicherry',
+  'pondicherry': 'Pondicherry',
+  'punjab': 'Punjab',
+  'rajasthan': 'Rajasthan',
+  'sikkim': 'Sikkim',
+  'tamil nadu': 'Tamil Nadu',
+  'tamilnadu': 'Tamil Nadu',
+  'telangana': 'Telangana',
+  'tripura': 'Tripura',
+  'uttar pradesh': 'Uttar Pradesh',
+  'uttarakhand': 'Uttarakhand',
+  'uttaranchal': 'Uttarakhand',
+  'west bengal': 'West Bengal',
+};
+
+function normalizeState(s) {
+  if (!s) return null;
+  const cleaned = s.trim().toLowerCase();
+  if (!cleaned || cleaned === 'na' || cleaned === 'n/a' || cleaned === '#n/a' || cleaned === 'unknown' || cleaned === '') return null;
+  return STATE_NAME_MAP[cleaned] || (s.trim().length > 1 ? s.trim() : null);
+}
+
+function parseDate(str) {
+  if (!str) return null;
+  str = str.trim();
+  let m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    let day = +m[1], month = +m[2], year = +m[3];
+    if (month > 12) { [day, month] = [month, day]; }
+    return new Date(year, month - 1, day);
+  }
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+function fetchData() {
+  Papa.parse(CSV_URL, {
+    download: true, header: true, skipEmptyLines: true,
+    complete(res) {
+      processData(res.data);
+      document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    },
+    error() {
+      document.getElementById('appContent').innerHTML = `<div class="error-state"><strong>Could not load data.</strong><p>Please refresh the page.</p></div>`;
+    }
+  });
+}
+
+function processData(raw) {
+  allRows = [];
+  raw.forEach(r => {
+    const keys = Object.keys(r);
+    const type = (r[keys[0]] || '').trim();
+    if (!type || type === 'Download status') return;
+    let dateStr = r['created_on'] || r['Created_on'] || Object.values(r)[1] || '';
+    const dt = parseDate(dateStr);
+    if (!dt || dt < new Date(2025, 0, 1)) return;
+    let week  = r['created_week']  || r['Created_week']  || Object.values(r)[2] || '';
+    let month = r['created_month'] || r['Created_month'] || Object.values(r)[3] || '';
+    let year  = r['created_year']  || r['Created_year']  || Object.values(r)[4] || dt.getFullYear();
+    let yearOfAdmission = r['year_of_admission'] || r['Year_of_admission'] || r['year of admission'] || '';
+    let stateRaw = r['state'] || r['State'] || '';
+    let state = normalizeState(stateRaw);
+    allRows.push({
+      type, isSignup: /sign.?up/i.test(type), isSignin: /sign.?in/i.test(type),
+      dt, year: +year || dt.getFullYear(), month: +month || dt.getMonth()+1,
+      week: +week || getWeekNum(dt),
+      day: dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0'),
+      yearOfAdmission: yearOfAdmission ? String(yearOfAdmission).trim() : 'Unknown',
+      state
+    });
+  });
+  populateFilters();
+  renderDashboard();
+}
+
+function getWeekNum(d) {
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+}
+
+function populateFilters() {
+  const years = [...new Set(allRows.map(r => r.year))].sort();
+  const ySel = document.getElementById('yearSel');
+  const curY = ySel.value;
+  ySel.innerHTML = '<option value="all">All years</option>';
+  years.forEach(y => {
+    const o = document.createElement('option');
+    o.value = y; o.textContent = y;
+    if (String(y) === curY) o.selected = true;
+    ySel.appendChild(o);
+  });
+}
+
+function updateMonthFilter() {
+  const y = document.getElementById('yearSel').value;
+  const mSel = document.getElementById('monthSel');
+  const cur = mSel.value;
+  const months = [...new Set(allRows.filter(r => y === 'all' || r.year === +y).map(r => r.month))].sort((a,b)=>a-b);
+  mSel.innerHTML = '<option value="all">All months</option>';
+  months.forEach(mn => {
+    const o = document.createElement('option');
+    o.value = mn; o.textContent = MONTHS[mn-1];
+    if (String(mn) === cur) o.selected = true;
+    mSel.appendChild(o);
+  });
+}
+
+function getFiltered() {
+  const y = document.getElementById('yearSel').value;
+  const m = document.getElementById('monthSel').value;
+  const type = document.getElementById('typeSel').value;
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  const fromDt = from ? new Date(from) : null;
+  const toDt   = to   ? new Date(to + 'T23:59:59') : null;
+  return allRows.filter(r => {
+    if (y !== 'all' && r.year  !== +y) return false;
+    if (m !== 'all' && r.month !== +m) return false;
+    if (type === 'signup' && !r.isSignup) return false;
+    if (type === 'signin' && !r.isSignin) return false;
+    if (fromDt && r.dt < fromDt) return false;
+    if (toDt   && r.dt > toDt)   return false;
+    return true;
+  });
+}
+
+function clearAllFilters() {
+  document.getElementById('yearSel').value  = 'all';
+  document.getElementById('typeSel').value  = 'all';
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value   = '';
+  updateMonthFilter();
+  document.getElementById('monthSel').value = 'all';
+  renderDashboard();
+}
+
+function updateActiveTags() {
+  const y = document.getElementById('yearSel').value;
+  const m = document.getElementById('monthSel').value;
+  const type = document.getElementById('typeSel').value;
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  const tags = [];
+  if (y !== 'all')    tags.push({ label:'Year: '+y,             clear:()=>{ document.getElementById('yearSel').value='all'; updateMonthFilter(); renderDashboard(); }});
+  if (m !== 'all')    tags.push({ label:'Month: '+MONTHS[+m-1], clear:()=>{ document.getElementById('monthSel').value='all'; renderDashboard(); }});
+  if (type !== 'all') tags.push({ label:type==='signup'?'Sign Ups only':'Sign Ins only', clear:()=>{ document.getElementById('typeSel').value='all'; renderDashboard(); }});
+  if (from)           tags.push({ label:'From: '+from,           clear:()=>{ document.getElementById('dateFrom').value=''; renderDashboard(); }});
+  if (to)             tags.push({ label:'To: '+to,               clear:()=>{ document.getElementById('dateTo').value=''; renderDashboard(); }});
+  window._tagClears = tags.map(t=>t.clear);
+  const container = document.getElementById('activeTags');
+  container.innerHTML = '';
+  tags.forEach((t,i)=>{
+    const el = document.createElement('div');
+    el.className = 'filter-tag';
+    el.innerHTML = `${t.label} <button onclick="window._tagClears[${i}]()">×</button>`;
+    container.appendChild(el);
+  });
+}
+
+function groupData(rows, view) {
+  const map = {};
+  rows.forEach(r => {
+    let key;
+    if (view==='monthly')     key = r.year+'-'+String(r.month).padStart(2,'0');
+    else if (view==='weekly') key = r.year+'-W'+String(r.week).padStart(2,'0');
+    else                      key = r.day;
+    if (!map[key]) map[key] = { signups:0, signins:0 };
+    if (r.isSignup) map[key].signups++;
+    else if (r.isSignin) map[key].signins++;
+    else map[key].signups++;
+  });
+  const keys = Object.keys(map).sort();
+  return {
+    labels: keys.map(k => {
+      if (view==='monthly') { const [y,mo]=k.split('-'); return MONTHS[+mo-1]+'\''+String(y).slice(2); }
+      if (view==='weekly')  return k.replace('-',' ');
+      const d = new Date(k+'T00:00:00');
+      return d.getDate()+'/'+(d.getMonth()+1);
+    }),
+    signups: keys.map(k=>map[k].signups),
+    signins: keys.map(k=>map[k].signins),
+    count: keys.length,
+  };
+}
+
+function getYearAdmissionData(rows) {
+  const map = {};
+  rows.forEach(r => {
+    const year = r.yearOfAdmission;
+    if (!map[year]) map[year] = 0;
+    if (r.isSignup) map[year]++;
+  });
+  const sortedYears = Object.keys(map).filter(y => y !== 'Unknown').sort((a,b)=>parseInt(a)-parseInt(b));
+  const unknownCount = map['Unknown'] || 0;
+  if (unknownCount > 0) sortedYears.push('Unknown');
+  return {
+    labels: sortedYears,
+    data: sortedYears.map(y => map[y]),
+    total: Object.values(map).reduce((a,b)=>a+b,0)
+  };
+}
+
+// ── STATE MAP DATA ──
+function getStateMapData(rows) {
+  const map = {};
+  // Only sign-ups, exclude null/NA states
+  rows.forEach(r => {
+    if (!r.isSignup) return;
+    if (!r.state) return;
+    map[r.state] = (map[r.state] || 0) + 1;
+  });
+  return map;
+}
+
+function destroyChart(id) {
+  if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+const BLUE='#2563EB', GREEN='#10b981';
+const BLUEF='rgba(37,99,235,0.10)', GREENF='rgba(16,185,129,0.08)';
+const GRID='rgba(0,0,0,0.05)', TICK='#94a3b8';
+
+function labelPlugin() {
+  return {
+    id:'topLabels',
+    afterDatasetsDraw(chart) {
+      const ctx = chart.ctx;
+      if (chart.data.labels.length > 60) return;
+      chart.data.datasets.forEach((ds,di) => {
+        const meta = chart.getDatasetMeta(di);
+        if (meta.hidden) return;
+        meta.data.forEach((el,i) => {
+          const v = ds.data[i]; if (!v) return;
+          const pos = el.tooltipPosition();
+          ctx.save(); ctx.font='600 10px -apple-system,sans-serif';
+          ctx.fillStyle=ds.borderColor||'#555'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+          ctx.fillText(v.toLocaleString(), pos.x, pos.y-5); ctx.restore();
+        });
+      });
+    }
+  };
+}
+
+// ── INDIA MAP RENDER ──
+async function loadAndRenderIndiaMap(stateData) {
+  const mapContainer = document.getElementById('indiaMapContainer');
+  if (!mapContainer) return;
+
+  // Show loading
+  mapContainer.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#94a3b8"><div class="spinner" style="width:24px;height:24px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:spin 0.7s linear infinite;margin:0 auto 12px"></div>Loading map…</div>';
+
+  try {
+    if (!indiaGeoJSON) {
+      const resp = await fetch('https://raw.githubusercontent.com/geohacker/india/master/state/india_telengana.geojson');
+      indiaGeoJSON = await resp.json();
+    }
+    renderIndiaMap(stateData, mapContainer);
+  } catch(e) {
+    console.error('Map load error:', e);
+    mapContainer.innerHTML = '<div class="map-no-data">Could not load map. Check your connection.</div>';
+  }
+}
+
+function renderIndiaMap(stateData, container) {
+  // Sorted states for sidebar list
+  const sortedStates = Object.entries(stateData)
+    .sort((a,b) => b[1] - a[1]);
+
+  const maxVal = sortedStates.length ? sortedStates[0][1] : 1;
+  const minVal = sortedStates.length ? sortedStates[sortedStates.length-1][1] : 0;
+
+  // Color scale: light blue → deep blue
+  const colorScale = d3.scaleSequential()
+    .domain([0, maxVal])
+    .interpolator(d3.interpolate('#dbeafe', '#1d4ed8'));
+
+  const noDataColor = '#f1f5f9';
+
+  // GeoJSON property name for state
+  // Try to detect correct property from first feature
+  let nameProp = 'NAME_1';
+  if (indiaGeoJSON.features && indiaGeoJSON.features.length) {
+    const props = indiaGeoJSON.features[0].properties;
+    if (props.ST_NM) nameProp = 'ST_NM';
+    else if (props.NAME_1) nameProp = 'NAME_1';
+    else if (props.name) nameProp = 'name';
+    else if (props.NAME) nameProp = 'NAME';
+    else nameProp = Object.keys(props)[0];
+  }
+
+  // Normalize GeoJSON state name to match our data
+  function geoStateName(feature) {
+    const raw = feature.properties[nameProp] || '';
+    return normalizeState(raw) || raw;
+  }
+
+  // SVG dimensions
+  const W = 480, H = 520;
+
+  // D3 projection
+  const projection = d3.geoMercator().fitSize([W, H], indiaGeoJSON);
+  const path = d3.geoPath().projection(projection);
+
+  // Build SVG string
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('id', 'indiaMapSvg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('xmlns', svgNS);
+
+  const tooltip = document.getElementById('mapTooltip');
+
+  indiaGeoJSON.features.forEach(feature => {
+    const stateName = geoStateName(feature);
+    const count = stateData[stateName] || 0;
+    const fill = count > 0 ? colorScale(count) : noDataColor;
+
+    const pathEl = document.createElementNS(svgNS, 'path');
+    pathEl.setAttribute('d', path(feature));
+    pathEl.setAttribute('fill', fill);
+    pathEl.setAttribute('data-state', stateName);
+    pathEl.setAttribute('data-count', count);
+
+    pathEl.addEventListener('mousemove', (e) => {
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 14) + 'px';
+      tooltip.style.top  = (e.clientY - 10) + 'px';
+      document.getElementById('ttState').textContent = stateName;
+      document.getElementById('ttCount').textContent = count > 0
+        ? `${count.toLocaleString()} sign-ups`
+        : 'No data';
+    });
+    pathEl.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
+
+    svg.appendChild(pathEl);
+  });
+
+  // Legend gradient (inline SVG linearGradient)
+  const defs = document.createElementNS(svgNS, 'defs');
+  const grad = document.createElementNS(svgNS, 'linearGradient');
+  grad.setAttribute('id', 'mapGrad');
+  grad.setAttribute('x1', '0%'); grad.setAttribute('x2', '100%');
+  grad.setAttribute('y1', '0%'); grad.setAttribute('y2', '0%');
+  const s1 = document.createElementNS(svgNS, 'stop');
+  s1.setAttribute('offset', '0%'); s1.setAttribute('stop-color', '#dbeafe');
+  const s2 = document.createElementNS(svgNS, 'stop');
+  s2.setAttribute('offset', '100%'); s2.setAttribute('stop-color', '#1d4ed8');
+  grad.appendChild(s1); grad.appendChild(s2);
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  // State list for sidebar
+  const listItems = sortedStates.slice(0, 35).map(([ state, count ], i) => {
+    const pct = maxVal ? count / maxVal : 0;
+    const color = colorScale(count);
+    return `
+      <div class="state-row">
+        <div class="state-row-left">
+          <span class="state-rank">${i+1}</span>
+          <span class="state-dot" style="background:${color}"></span>
+          <span class="state-name">${state}</span>
+        </div>
+        <span class="state-count">${count.toLocaleString()}</span>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="map-container">
+      <div id="mapSvgWrapper"></div>
+      <div class="map-legend-panel">
+        <div class="map-legend-title">Sign-ups by State</div>
+        <div class="map-color-scale"></div>
+        <div class="map-scale-labels">
+          <span>${minVal.toLocaleString()}</span>
+          <span>${Math.round(maxVal/2).toLocaleString()}</span>
+          <span>${maxVal.toLocaleString()}</span>
+        </div>
+        <div class="state-list">${listItems || '<div class="map-no-data">No state data available</div>'}</div>
+      </div>
+    </div>`;
+
+  document.getElementById('mapSvgWrapper').appendChild(svg);
+}
+
+function renderDashboard() {
+  updateMonthFilter();
+  updateActiveTags();
+  const filtered   = getFiltered();
+  const view       = document.getElementById('viewSel').value;
+  const typeFilter = document.getElementById('typeSel').value;
+  const { labels, signups, signins, count:periods } = groupData(filtered, view);
+  const totalSU = signups.reduce((a,b)=>a+b,0);
+  const totalSI = signins.reduce((a,b)=>a+b,0);
+  const total   = totalSU + totalSI;
+  const ratio   = total ? Math.round(totalSU/total*100) : 0;
+  const showSignup = typeFilter !== 'signin';
+  const showSignin = typeFilter !== 'signup';
+  const periodLabel = view==='daily'?'day':view==='weekly'?'week':'month';
+
+  document.getElementById('appContent').innerHTML = `
+    <div class="metrics">
+      <div class="metric-card blue" style="opacity:${typeFilter==='signin'?'0.25':'1'}">
+        <div class="m-label">Sign Ups</div>
+        <div class="m-value">${totalSU.toLocaleString()}</div>
+        <div class="m-sub">${ratio}% of total</div>
+      </div>
+      <div class="metric-card green" style="opacity:${typeFilter==='signup'?'0.25':'1'}">
+        <div class="m-label">Sign Ins</div>
+        <div class="m-value">${totalSI.toLocaleString()}</div>
+        <div class="m-sub">${100-ratio}% of total</div>
+      </div>
+      <div class="metric-card amber">
+        <div class="m-label">Total Counts</div>
+        <div class="m-value">${total.toLocaleString()}</div>
+        <div class="m-sub">${periods} ${periodLabel}s</div>
+      </div>
+      <div class="metric-card slate">
+        <div class="m-label">Avg / ${periodLabel.charAt(0).toUpperCase()+periodLabel.slice(1)}</div>
+        <div class="m-value">${periods?Math.round(total/periods).toLocaleString():0}</div>
+        <div class="m-sub">events per ${periodLabel}</div>
+      </div>
+    </div>
+    <div class="charts-grid">
+      <div class="chart-card full">
+        <div class="chart-header">
+          <div class="chart-title">Sign Ups vs Sign Ins — trend over time</div>
+          <div class="chart-sub">${view.charAt(0).toUpperCase()+view.slice(1)} view · smooth line</div>
+        </div>
+        <div class="legend">
+          ${showSignup?`<div class="legend-item"><div class="legend-sq" style="background:${BLUE}"></div>Sign Ups</div>`:''}
+          ${showSignin?`<div class="legend-item"><div class="legend-sq" style="background:${GREEN}"></div>Sign Ins</div>`:''}
+        </div>
+        <div style="position:relative;height:300px"><canvas id="cLine"></canvas></div>
+      </div>
+      <div class="chart-card full">
+        <div class="chart-header">
+          <div class="chart-title">Year of Admission — Distribution of all sign-ups</div>
+          <div class="chart-sub">Breakdown by admission year</div>
+        </div>
+        <div style="position:relative;height:280px"><canvas id="cYearAdmission"></canvas></div>
+      </div>
+      <div class="chart-card full">
+        <div class="chart-header">
+          <div class="chart-title">Sign-ups by State — India Map</div>
+          <div class="chart-sub">Sign Ups only · Jan 2025 onwards · Hover over a state to see count</div>
+        </div>
+        <div id="indiaMapContainer" style="min-height:200px"></div>
+      </div>
+    </div>
+  `;
+
+  const pointR = labels.length>40?2:labels.length>20?3:4;
+  const ticksX = { color:TICK, font:{size:11}, maxRotation:45, autoSkip:true, maxTicksLimit:Math.min(labels.length,16) };
+  const ticksY = { color:TICK, font:{size:11} };
+  const lineDatasets = [];
+  if (showSignup) lineDatasets.push({ label:'Sign Ups', data:signups, borderColor:BLUE, backgroundColor:BLUEF, borderWidth:2.5, tension:0.45, fill:true, pointBackgroundColor:BLUE, pointRadius:pointR, pointHoverRadius:6 });
+  if (showSignin) lineDatasets.push({ label:'Sign Ins', data:signins, borderColor:GREEN, backgroundColor:GREENF, borderWidth:2.5, tension:0.45, fill:true, pointBackgroundColor:GREEN, pointRadius:pointR, pointHoverRadius:6 });
+
+  destroyChart('line');
+  chartInstances['line'] = new Chart(document.getElementById('cLine'), {
+    type:'line', plugins:[labelPlugin()],
+    data:{ labels, datasets:lineDatasets },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{mode:'index',intersect:false,padding:10,cornerRadius:8} },
+      scales:{ x:{grid:{color:GRID},ticks:ticksX}, y:{grid:{color:GRID},ticks:ticksY,beginAtZero:true} }
+    }
+  });
+
+  destroyChart('yearAdmission');
+  const yearAdmData = getYearAdmissionData(filtered);
+  const yearColors = yearAdmData.labels.map((label, idx) => {
+    const colors = ['rgba(37,99,235,0.85)','rgba(16,185,129,0.85)','rgba(59,130,246,0.85)','rgba(139,92,246,0.85)','rgba(236,72,153,0.85)','rgba(245,158,11,0.85)','rgba(34,197,94,0.85)','rgba(8,145,178,0.85)','rgba(168,85,247,0.85)','rgba(219,39,119,0.85)','rgba(75,192,192,0.85)','rgba(255,99,132,0.85)','rgba(54,162,235,0.85)','rgba(153,102,255,0.85)','rgba(201,203,207,0.85)'];
+    return colors[idx % colors.length];
+  });
+  const yearBorders = yearColors.map(c => c.replace('0.85', '1'));
+  chartInstances['yearAdmission'] = new Chart(document.getElementById('cYearAdmission'), {
+    type:'bar', plugins:[labelPlugin()],
+    data:{ labels: yearAdmData.labels, datasets:[{ label:'Sign Ups', data: yearAdmData.data, backgroundColor: yearColors, borderColor: yearBorders, borderWidth:1.5, borderRadius:5, borderSkipped:false }] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{padding:10,cornerRadius:8,backgroundColor:'rgba(0,0,0,0.85)',titleFont:{size:12,weight:'bold'},bodyFont:{size:11}} },
+      scales:{ x:{grid:{display:false},ticks:{color:TICK,font:{size:11},maxRotation:45,autoSkip:false}}, y:{grid:{color:GRID},ticks:{color:TICK,font:{size:11},beginAtZero:true}} }
+    }
+  });
+
+  // Render India map — sign-ups only, all data already filtered from Jan 2025
+  const signupRows = filtered.filter(r => r.isSignup);
+  const stateData = getStateMapData(signupRows);
+  loadAndRenderIndiaMap(stateData);
+}
+
+function attachListeners() {
+  document.getElementById('yearSel').addEventListener('change', ()=>{ updateMonthFilter(); renderDashboard(); });
+  document.getElementById('monthSel').addEventListener('change', renderDashboard);
+  document.getElementById('typeSel').addEventListener('change', renderDashboard);
+  document.getElementById('viewSel').addEventListener('change', renderDashboard);
+  document.getElementById('dateFrom').addEventListener('change', renderDashboard);
+  document.getElementById('dateTo').addEventListener('change', renderDashboard);
+}
+</script>
+</body>
+</html>
