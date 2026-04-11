@@ -91,15 +91,23 @@
   .map-tab.active-india { border-color:#2563eb; background:#eff6ff; color:#2563eb; }
   .map-tab.active-fmge  { border-color:#dc2626; background:#fef2f2; color:#dc2626; }
 
-  /* MAP LAYOUT — wider map, tighter panel */
+  /* MAP LAYOUT — India: side panel | World: full width + list below */
   .map-container { display:grid; grid-template-columns:1fr 280px; gap:16px; align-items:start; }
-  /* INCREASED MAP SIZES */
+  .map-container-world { display:block; }
+  /* MAP SIZES */
   #indiaMapSvg { width:100%; height:620px; }
   #indiaMapSvg path { stroke:#fff; stroke-width:0.8; cursor:pointer; transition:opacity 0.15s,stroke-width 0.15s; }
   #indiaMapSvg path:hover { stroke-width:2; stroke:#1a1a2e; opacity:0.85; }
-  .world-map-svg { width:100%; height:560px; }
+  .world-map-svg { width:100%; height:580px; display:block; }
   .world-map-svg path { cursor:pointer; transition:opacity 0.15s; }
   .world-map-svg path:hover { opacity:0.72; }
+  /* World legend below map */
+  .world-legend-below { margin-top:16px; }
+  .world-legend-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
+  .world-legend-scale-wrap { display:flex; align-items:center; gap:10px; flex:1; max-width:400px; }
+  .world-legend-scale-bar { flex:1; height:10px; border-radius:5px; background:linear-gradient(to right,#fecaca,#991b1b); }
+  .world-legend-scale-labels { display:flex; justify-content:space-between; font-size:11px; color:#64748b; min-width:120px; }
+  .world-country-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:2px; }
 
   .map-tooltip { position:fixed; background:rgba(15,23,42,0.95); color:#fff; padding:10px 14px; border-radius:10px; font-size:13px; pointer-events:none; z-index:9999; display:none; box-shadow:0 8px 24px rgba(0,0,0,0.3); backdrop-filter:blur(4px); min-width:160px; }
   .map-tooltip .tt-state { font-weight:700; font-size:14px; margin-bottom:4px; }
@@ -633,12 +641,11 @@ function renderWorldMap(countryData,container){
     'united arab emirates':'UAE','syrian arab republic':'Syria',
   };
 
-  // Countries large enough to label (approximate pixel area threshold)
-  // We label only countries that have data AND are reasonably sized
-  const LABEL_MIN_AREA = 800; // px² in projected space — skip tiny islands
+  // Only label top 8 countries by count
+  const top8Names=new Set(sorted.slice(0,8).map(([c])=>c.toLowerCase()));
 
-  const NS='http://www.w3.org/2000/svg', W=1100, H=560;
-  const proj=d3.geoNaturalEarth1().scale(170).translate([W/2,H/2]);
+  const NS='http://www.w3.org/2000/svg', W=1200, H=580;
+  const proj=d3.geoNaturalEarth1().scale(185).translate([W/2,H/2+10]);
   const path=d3.geoPath().projection(proj);
   const tip=document.getElementById('mapTooltip');
 
@@ -676,17 +683,13 @@ function renderWorldMap(countryData,container){
     }
   });
 
-  // ── ADD COUNTRY LABELS (name + count) for countries with data ──
+  // ── ADD COUNTRY LABELS — top 8 countries only ──
   featuresWithData.forEach(({feature, aliased, count})=>{
+    // Only label if this country is in top 8
+    if(!top8Names.has(aliased.toLowerCase())) return;
+
     const centroid=path.centroid(feature);
     if(!centroid||isNaN(centroid[0])||isNaN(centroid[1])) return;
-
-    // Estimate area to skip tiny countries
-    const bounds=path.bounds(feature);
-    if(!bounds) return;
-    const bw=(bounds[1][0]-bounds[0][0]), bh=(bounds[1][1]-bounds[0][1]);
-    const approxArea=bw*bh;
-    if(approxArea<LABEL_MIN_AREA) return;
 
     const isDark=count>maxVal*0.45;
     const textFill=isDark?'#fff':'#7f1d1d';
@@ -739,13 +742,18 @@ function renderWorldMap(countryData,container){
     </div><span class="state-count">${n.toLocaleString()}</span></div>`).join('');
 
   container.innerHTML=`
-    <div class="map-container">
+    <div class="map-container-world">
       <div id="mapSvgWrapper"></div>
-      <div class="map-legend-panel">
-        <div class="map-legend-title">🌍 FMGE Sign-ups by Country</div>
-        <div class="map-color-scale" style="background:linear-gradient(to right,#fecaca,#991b1b)"></div>
-        <div class="map-scale-labels"><span>${minVal.toLocaleString()}</span><span>${Math.round(maxVal/2).toLocaleString()}</span><span>${maxVal.toLocaleString()}</span></div>
-        <div class="state-list">${listItems||'<div class="map-no-data">No country data</div>'}</div>
+      <div class="world-legend-below">
+        <div class="world-legend-header">
+          <div class="map-legend-title" style="margin:0">🌍 FMGE sign-ups by country</div>
+          <div class="world-legend-scale-wrap">
+            <span style="font-size:11px;color:#94a3b8">${minVal.toLocaleString()}</span>
+            <div class="world-legend-scale-bar"></div>
+            <span style="font-size:11px;color:#94a3b8">${maxVal.toLocaleString()}</span>
+          </div>
+        </div>
+        <div class="world-country-grid">${listItems||'<div class="map-no-data">No country data</div>'}</div>
       </div>
     </div>`;
   document.getElementById('mapSvgWrapper').appendChild(svg);
@@ -820,8 +828,8 @@ function renderDashboard(){
           <div class="chart-sub">Sign Ups only · Jan 2025 onwards · Hover to see counts · Labels on both maps</div>
         </div>
         <div class="map-tabs">
-          <button id="btnMapIndia" class="map-tab ${activeMapTab==='india'?'active-india':''}" onclick="switchMapTab('india')">🇮🇳 India (States)</button>
-          <button id="btnMapFmge"  class="map-tab ${activeMapTab==='fmge'?'active-fmge':''}"  onclick="switchMapTab('fmge')">🌍 FMGE (Countries)</button>
+          <button id="btnMapIndia" class="map-tab ${activeMapTab==='india'?'active-india':''}" onclick="switchMapTab('india')">🇮🇳 India </button>
+          <button id="btnMapFmge"  class="map-tab ${activeMapTab==='fmge'?'active-fmge':''}"  onclick="switchMapTab('fmge')">🌍 FMGE </button>
         </div>
         <div id="mapSvgArea" style="min-height:200px"></div>
       </div>
