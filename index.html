@@ -1,565 +1,281 @@
 <!DOCTYPE html>
 <html lang="en">
-
- <!-- ====== DBMCI AUTH GUARD — paste this inside <head> at the top of index.html ====== -->
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-    const firebaseConfig = {
-        apiKey: "AIzaSyBaBcRJruE9zH6STgJjW5_sqy6H0PIHVvk",
-        authDomain: "live-dash-b9455.firebaseapp.com",
-        projectId: "live-dash-b9455",
-        storageBucket: "live-dash-b9455.firebasestorage.app",
-        messagingSenderId: "884569568313",
-        appId: "1:884569568313:web:0cb0f555b6d1ca3e38c9e8"
-    };
-
-    const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-
-    // Hide dashboard until auth check completes
-    document.documentElement.style.visibility = 'hidden';
-
-    onAuthStateChanged(auth, async (user) => {
-        if (!user) {
-            window.location.href = 'login.html';
-            return;
-        }
-
-        const loginTime = localStorage.getItem('dbmciLoginTime');
-        const sessionAge = Date.now() - parseInt(loginTime || '0');
-
-        if (!loginTime || sessionAge >= SESSION_DURATION) {
-            // 24 hours exceeded — force logout
-            await signOut(auth);
-            localStorage.removeItem('dbmciLoginTime');
-            localStorage.removeItem('dbmciUserEmail');
-            window.location.href = 'login.html';
-            return;
-        }
-
-        // Valid session — show dashboard
-        document.documentElement.style.visibility = 'visible';
-    });
-
-    // Expose logout function globally so you can call dbmciLogout() from a button
-    window.dbmciLogout = async function() {
-        await signOut(auth);
-        localStorage.removeItem('dbmciLoginTime');
-        localStorage.removeItem('dbmciUserEmail');
-        window.location.href = 'login.html';
-    };
-</script>
-<!-- ====== END AUTH GUARD ====== -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DBMCI One | Secure Access</title>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
         :root {
-            --bg-deep: #06090f;
-            --bg-card: rgba(12, 18, 30, 0.75);
-            --surface: rgba(255, 255, 255, 0.03);
-            --surface-hover: rgba(255, 255, 255, 0.06);
-            --border: rgba(255, 255, 255, 0.06);
-            --border-focus: rgba(212, 175, 55, 0.5);
-            --text: #e8e6e3;
-            --text-dim: rgba(255, 255, 255, 0.4);
-            --text-label: rgba(255, 255, 255, 0.55);
-            --gold: #1a6fb5;
-            --gold-light: #5fb1bc;
-            --gold-dark: #559dd4;
-            --error: #ef4444;
+            --bg-deep: #06090f; --bg-card: rgba(12,18,30,0.75);
+            --border: rgba(255,255,255,0.06); --text: #e8e6e3;
+            --text-dim: rgba(255,255,255,0.4); --gold: #1a6fb5;
+            --gold-light: #5fb1bc; --gold-dark: #559dd4;
             --success: #22c55e;
         }
+        body { font-family:'Space Grotesk',sans-serif; background:var(--bg-deep); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+        .noise { position:fixed; inset:0; z-index:1; opacity:0.035; pointer-events:none; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size:200px; }
 
-        body {
-            font-family: 'Space Grotesk', sans-serif;
-            background: var(--bg-deep);
-            color: var(--text);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            position: relative;
-        }
+        /* INTRO */
+        #intro { position:fixed; inset:0; z-index:100; background:var(--bg-deep); display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity 0.8s ease,transform 0.8s ease; }
+        #intro.hide { opacity:0; transform:scale(1.05); pointer-events:none; }
+        .intro-line { width:0; height:1px; background:linear-gradient(90deg,transparent,var(--gold),transparent); margin:24px 0; transition:width 1s cubic-bezier(0.23,1,0.32,1); }
+        .intro-line.expand { width:min(400px,80vw); }
+        .intro-text { font-size:clamp(12px,2vw,14px); font-family:'JetBrains Mono',monospace; letter-spacing:0.35em; text-transform:uppercase; color:var(--text-dim); opacity:0; transform:translateY(10px); transition:all 0.6s ease; }
+        .intro-text.show { opacity:1; transform:translateY(0); }
+        .intro-icon { width:60px; height:60px; border:2px solid var(--gold); border-radius:50%; display:flex; align-items:center; justify-content:center; opacity:0; transform:scale(0.5) rotate(-90deg); transition:all 0.8s cubic-bezier(0.34,1.56,0.64,1); }
+        .intro-icon.show { opacity:1; transform:scale(1) rotate(0deg); }
+        .intro-icon svg { stroke:var(--gold); }
 
-        .noise {
-            position: fixed;
-            inset: 0;
-            z-index: 1;
-            opacity: 0.035;
-            pointer-events: none;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-            background-size: 200px;
-        }
+        /* PAGES */
+        #loginPage, #pendingPage { display:none; position:relative; z-index:10; width:100%; max-width:420px; padding:0 20px; opacity:0; transform:translateY(40px); transition:all 0.9s cubic-bezier(0.23,1,0.32,1); }
+        #loginPage.visible, #pendingPage.visible { opacity:1; transform:translateY(0); }
 
-        /* ====== INTRO ====== */
-        #intro {
-            position: fixed;
-            inset: 0;
-            z-index: 100;
-            background: var(--bg-deep);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            transition: opacity 0.8s ease, transform 0.8s ease;
-        }
-        #intro.hide { opacity: 0; transform: scale(1.05); pointer-events: none; }
+        /* CARD */
+        .card { background:var(--bg-card); backdrop-filter:blur(60px); -webkit-backdrop-filter:blur(60px); border:1px solid var(--border); border-radius:20px; padding:48px 36px 36px; position:relative; overflow:hidden; }
+        .card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 0%,var(--gold-dark) 30%,var(--gold-light) 50%,var(--gold-dark) 70%,transparent 100%); opacity:0.6; }
+        .card-glow { position:absolute; top:-100px; left:50%; transform:translateX(-50%); width:300px; height:200px; background:radial-gradient(ellipse,var(--gold) 0%,transparent 70%); opacity:0.04; pointer-events:none; }
 
-        .intro-line {
-            width: 0;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, var(--gold), transparent);
-            margin: 24px 0;
-            transition: width 1s cubic-bezier(0.23, 1, 0.32, 1);
-        }
-        .intro-line.expand { width: min(400px, 80vw); }
+        /* BRAND */
+        .brand { text-align:center; margin-bottom:36px; }
+        .brand-mark { display:inline-flex; align-items:center; justify-content:center; width:56px; height:56px; border:1.5px solid rgba(61,166,231,0.3); border-radius:14px; margin-bottom:20px; background:rgba(73,201,233,0.05); }
+        .brand h1 { font-size:22px; font-weight:600; letter-spacing:-0.02em; margin-bottom:8px; }
+        .brand p { font-size:13px; color:var(--text-dim); line-height:1.5; }
 
-        .intro-text {
-            font-size: clamp(12px, 2vw, 14px);
-            font-family: 'JetBrains Mono', monospace;
-            letter-spacing: 0.35em;
-            text-transform: uppercase;
-            color: var(--text-dim);
-            opacity: 0;
-            transform: translateY(10px);
-            transition: all 0.6s ease;
-        }
-        .intro-text.show { opacity: 1; transform: translateY(0); }
+        /* GOOGLE BTN */
+        .google-btn { width:100%; padding:14px 20px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; background:rgba(255,255,255,0.04); color:var(--text); font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:12px; transition:all 0.3s cubic-bezier(0.23,1,0.32,1); }
+        .google-btn:hover { background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.2); transform:translateY(-1px); box-shadow:0 8px 24px rgba(0,0,0,0.3); }
+        .google-btn:active { transform:translateY(0); }
+        .google-btn:disabled { opacity:0.6; cursor:not-allowed; transform:none; }
+        .google-icon { width:20px; height:20px; flex-shrink:0; }
 
-        .intro-icon {
-            width: 60px; height: 60px;
-            border: 2px solid var(--gold);
-            border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            opacity: 0;
-            transform: scale(0.5) rotate(-90deg);
-            transition: all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        .intro-icon.show { opacity: 1; transform: scale(1) rotate(0deg); }
-        .intro-icon svg { stroke: var(--gold); }
+        /* INFO BOX */
+        .info-box { padding:12px 16px; background:rgba(26,111,181,0.08); border:1px solid rgba(26,111,181,0.2); border-radius:12px; margin-bottom:24px; font-size:12px; color:rgba(95,177,188,0.9); line-height:1.6; text-align:center; }
 
-        /* ====== CARD ====== */
-        #loginWrap {
-            position: relative;
-            z-index: 10;
-            width: 100%;
-            max-width: 420px;
-            padding: 0 20px;
-            opacity: 0;
-            transform: translateY(40px);
-            transition: all 0.9s cubic-bezier(0.23, 1, 0.32, 1);
-        }
-        #loginWrap.visible { opacity: 1; transform: translateY(0); }
+        /* ERROR */
+        .error-box { display:none; align-items:center; gap:10px; padding:12px 16px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.15); border-radius:12px; margin-bottom:20px; font-size:13px; color:#f87171; }
+        .error-box.show { display:flex; }
 
-        .card {
-            background: var(--bg-card);
-            backdrop-filter: blur(60px);
-            -webkit-backdrop-filter: blur(60px);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 48px 36px 36px;
-            position: relative;
-            overflow: hidden;
-        }
-        .card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 1px;
-            background: linear-gradient(90deg, transparent 0%, var(--gold-dark) 30%, var(--gold-light) 50%, var(--gold-dark) 70%, transparent 100%);
-            opacity: 0.6;
-        }
-        .card-glow {
-            position: absolute;
-            top: -100px; left: 50%;
-            transform: translateX(-50%);
-            width: 300px; height: 200px;
-            background: radial-gradient(ellipse, var(--gold) 0%, transparent 70%);
-            opacity: 0.04;
-            pointer-events: none;
-        }
+        /* PENDING */
+        .pending-icon { font-size:48px; text-align:center; margin-bottom:16px; }
+        .pending-title { font-size:20px; font-weight:600; text-align:center; margin-bottom:10px; }
+        .pending-sub { font-size:13px; color:var(--text-dim); text-align:center; line-height:1.7; margin-bottom:28px; }
+        .signout-btn { width:100%; padding:12px; border:1px solid rgba(255,255,255,0.1); border-radius:12px; background:transparent; color:var(--text-dim); font-family:'Space Grotesk',sans-serif; font-size:14px; cursor:pointer; transition:all 0.2s; }
+        .signout-btn:hover { border-color:rgba(239,68,68,0.4); color:#f87171; background:rgba(239,68,68,0.05); }
 
-        /* ====== BRAND ====== */
-        .brand { text-align: center; margin-bottom: 36px; }
-        .brand-mark {
-            display: inline-flex;
-            align-items: center; justify-content: center;
-            width: 56px; height: 56px;
-            border: 1.5px solid rgba(61, 166, 231, 0.3);
-            border-radius: 14px;
-            margin-bottom: 20px;
-            background: rgba(73, 201, 233, 0.05);
-        }
-        .brand h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
-        .brand p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+        /* SUCCESS */
+        #successOverlay { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.5s ease; }
+        #successOverlay.show { opacity:1; }
+        .success-ring { width:80px; height:80px; border-radius:50%; border:2px solid var(--success); display:flex; align-items:center; justify-content:center; box-shadow:0 0 40px rgba(34,197,94,0.3); animation:popBounce 0.6s cubic-bezier(0.34,1.56,0.64,1); }
+        @keyframes popBounce { 0%{transform:scale(0)} 100%{transform:scale(1)} }
+        .success-ring svg { stroke:var(--success); stroke-dasharray:50; stroke-dashoffset:50; animation:drawTick 0.4s ease forwards 0.3s; }
+        @keyframes drawTick { to{stroke-dashoffset:0} }
+        .success-text { margin-top:20px; font-size:14px; font-weight:500; color:var(--success); letter-spacing:0.1em; text-transform:uppercase; opacity:0; animation:fadeUp 0.4s ease forwards 0.5s; }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes cardFlyUp { to{opacity:0;transform:translateY(-80px) scale(0.9)} }
+        .fly-up { animation:cardFlyUp 0.7s cubic-bezier(0.55,0.085,0.68,0.53) forwards; }
 
-        /* ====== GOOGLE BTN ====== */
-        .google-btn {
-            width: 100%;
-            padding: 14px 20px;
-            border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 12px;
-            background: rgba(255,255,255,0.04);
-            color: var(--text);
-            font-family: 'Space Grotesk', sans-serif;
-            font-size: 15px;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        .google-btn:hover {
-            background: rgba(255,255,255,0.08);
-            border-color: rgba(255,255,255,0.2);
-            transform: translateY(-1px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-        }
-        .google-btn:active { transform: translateY(0); }
-        .google-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-        .google-icon {
-            width: 20px; height: 20px;
-            flex-shrink: 0;
-        }
-
-        .divider {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin: 24px 0;
-            color: var(--text-dim);
-            font-size: 12px;
-            letter-spacing: 0.05em;
-        }
-        .divider::before, .divider::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--border);
-        }
-
-        /* ====== ERROR ====== */
-        .error-box {
-            display: none;
-            align-items: center;
-            gap: 10px;
-            padding: 12px 16px;
-            background: rgba(239, 68, 68, 0.08);
-            border: 1px solid rgba(239, 68, 68, 0.15);
-            border-radius: 12px;
-            margin-bottom: 20px;
-            font-size: 13px;
-            color: #f87171;
-            animation: slideDown 0.3s ease;
-        }
-        .error-box.show { display: flex; }
-
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* ====== INFO BOX ====== */
-        .info-box {
-            padding: 12px 16px;
-            background: rgba(26, 111, 181, 0.08);
-            border: 1px solid rgba(26, 111, 181, 0.2);
-            border-radius: 12px;
-            margin-bottom: 24px;
-            font-size: 12px;
-            color: rgba(95, 177, 188, 0.9);
-            line-height: 1.6;
-            text-align: center;
-        }
-
-        /* ====== SUCCESS OVERLAY ====== */
-        #successOverlay {
-            position: fixed;
-            inset: 0;
-            z-index: 50;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.5s ease;
-        }
-        #successOverlay.show { opacity: 1; }
-
-        .success-ring {
-            width: 80px; height: 80px;
-            border-radius: 50%;
-            border: 2px solid var(--success);
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 0 40px rgba(34,197,94,0.3);
-            animation: popBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        @keyframes popBounce { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-
-        .success-ring svg {
-            stroke: var(--success);
-            stroke-dasharray: 50;
-            stroke-dashoffset: 50;
-            animation: drawTick 0.4s ease forwards 0.3s;
-        }
-        @keyframes drawTick { to { stroke-dashoffset: 0; } }
-
-        .success-text {
-            margin-top: 20px;
-            font-size: 14px; font-weight: 500;
-            color: var(--success);
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            opacity: 0;
-            animation: fadeUp 0.4s ease forwards 0.5s;
-        }
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes cardFlyUp {
-            to { opacity: 0; transform: translateY(-80px) scale(0.9); }
-        }
-        .fly-up { animation: cardFlyUp 0.7s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards; }
-
-        /* ====== SPINNER ====== */
-        .spinner {
-            width: 18px; height: 18px;
-            border: 2px solid rgba(255,255,255,0.15);
-            border-top-color: var(--text);
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .footer {
-            text-align: center;
-            margin-top: 28px;
-            font-size: 11px;
-            color: var(--text-dim);
-            letter-spacing: 0.05em;
-        }
-
-        @keyframes shake {
-            0%,100% { transform: translateX(0); }
-            10%,50% { transform: translateX(-8px); }
-            30%,70% { transform: translateX(8px); }
-            90% { transform: translateX(-3px); }
-        }
-        .shake { animation: shake 0.5s ease; }
-
-        @media (max-width: 480px) {
-            .card { padding: 36px 24px 28px; }
-        }
+        .spinner { width:18px; height:18px; border:2px solid rgba(255,255,255,0.15); border-top-color:var(--text); border-radius:50%; animation:spin 0.6s linear infinite; }
+        @keyframes spin { to{transform:rotate(360deg)} }
+        .footer { text-align:center; margin-top:24px; font-size:11px; color:var(--text-dim); letter-spacing:0.05em; }
+        @keyframes shake { 0%,100%{transform:translateX(0)} 10%,50%{transform:translateX(-8px)} 30%,70%{transform:translateX(8px)} 90%{transform:translateX(-3px)} }
+        .shake { animation:shake 0.5s ease; }
+        @media (max-width:480px) { .card{padding:36px 24px 28px} }
     </style>
 </head>
 <body>
 
-    <div class="noise"></div>
+<div class="noise"></div>
 
-    <!-- INTRO -->
-    <div id="intro">
-        <div class="intro-icon" id="introIcon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5"/>
-                <path d="M2 12l10 5 10-5"/>
+<!-- INTRO -->
+<div id="intro">
+    <div class="intro-icon" id="introIcon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+        </svg>
+    </div>
+    <div class="intro-line" id="introLine"></div>
+    <div class="intro-text" id="introText">DBMCI One Dashboard</div>
+</div>
+
+<!-- SUCCESS OVERLAY -->
+<div id="successOverlay">
+    <div class="success-ring">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+        </svg>
+    </div>
+    <div class="success-text">Access Granted</div>
+</div>
+
+<!-- LOGIN PAGE -->
+<div id="loginPage">
+    <div class="card" id="loginCard">
+        <div class="card-glow"></div>
+        <div class="brand">
+            <div class="brand-mark">
+                <img src="dbmci-one-logo.png" alt="DBMCI One" style="width:40px;height:40px;object-fit:contain;">
+            </div>
+            <h1 id="greeting">Welcome Back</h1>
+            <p>Sign in to your DBMCI One workspace</p>
+        </div>
+        <div class="info-box">
+            🔒 Access restricted to DBMCI team members.<br>
+            Use your official Google account to request access.
+        </div>
+        <div class="error-box" id="errorBox">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
+            <span id="errorText"></span>
         </div>
-        <div class="intro-line" id="introLine"></div>
-        <div class="intro-text" id="introText">DBMCI One Dashboard</div>
-    </div>
-
-    <!-- SUCCESS OVERLAY -->
-    <div id="successOverlay">
-        <div class="success-ring">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12"/>
+        <button class="google-btn" id="googleBtn" onclick="signInWithGoogle()">
+            <svg class="google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-        </div>
-        <div class="success-text">Access Granted</div>
+            Continue with Google
+        </button>
+        <div class="footer">© DBMCI One · Sessions expire after 24 hours</div>
     </div>
+</div>
 
-    <!-- LOGIN CARD -->
-    <div id="loginWrap">
-        <div class="card" id="loginCard">
-            <div class="card-glow"></div>
-
-            <div class="brand">
-                <div class="brand-mark">
-                    <img src="dbmci-one-logo.png" alt="DBMCI One" style="width:40px; height:40px; object-fit:contain;">
-                </div>
-                <h1 id="greeting">Welcome Back</h1>
-                <p>Sign in to your DBMCI One workspace</p>
-            </div>
-
-            <div class="info-box">
-                🔒 Access restricted to DBMCI team members only.<br>
-                Use your official work Google account.
-            </div>
-
-            <div class="error-box" id="errorBox">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                <span id="errorText"></span>
-            </div>
-
-            <button class="google-btn" id="googleBtn" onclick="signInWithGoogle()">
-                <svg class="google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                </svg>
-                Continue with Google
-            </button>
-
-            <div class="footer">© DBMCI One · Sessions expire after 24 hours</div>
+<!-- PENDING PAGE -->
+<div id="pendingPage">
+    <div class="card">
+        <div class="card-glow"></div>
+        <div class="pending-icon">⏳</div>
+        <div class="pending-title">Access Requested</div>
+        <div class="pending-sub">
+            Your request has been sent to the admin for approval.<br>
+            You'll get access once it's approved.<br>
+            Please check back later.
         </div>
+        <button class="signout-btn" onclick="doSignOut()">Sign out</button>
     </div>
+</div>
 
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+<script>
+const SUPABASE_URL  = 'https://gbodnshovsgaisfvxjnz.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdib2Ruc2hvdnNnYWlzZnZ4am56Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2NTkzNDYsImV4cCI6MjA5MTIzNTM0Nn0.amG5NTp9619o-246N8S4DZU50WmxwaadOtNvbHBr0z4';
+const SESSION_DURATION = 24 * 60 * 60 * 1000;
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyBaBcRJruE9zH6STgJjW5_sqy6H0PIHVvk",
-            authDomain: "live-dash-b9455.firebaseapp.com",
-            projectId: "live-dash-b9455",
-            storageBucket: "live-dash-b9455.firebasestorage.app",
-            messagingSenderId: "884569568313",
-            appId: "1:884569568313:web:0cb0f555b6d1ca3e38c9e8",
-            measurementId: "G-PL51NRP7R7"
-        };
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth:{ detectSessionInUrl:true, persistSession:true, autoRefreshToken:true, flowType:'implicit', storage:localStorage }
+});
 
-        const ALLOWED_DOMAINS = ['dbmci.one', 'marrowmed.com', 'dbmi.edu.in'];
-        const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in ms
+// Greeting
+const h = new Date().getHours();
+const greetEl = document.getElementById('greeting');
+if (h>=5&&h<12) greetEl.textContent='Good Morning';
+else if (h>=12&&h<17) greetEl.textContent='Good Afternoon';
+else if (h>=17&&h<21) greetEl.textContent='Good Evening';
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
+// Intro
+setTimeout(()=>document.getElementById('introIcon').classList.add('show'),300);
+setTimeout(()=>document.getElementById('introLine').classList.add('expand'),900);
+setTimeout(()=>document.getElementById('introText').classList.add('show'),1400);
 
-        // ====== GREETING ======
-        const h = new Date().getHours();
-        let g = 'Welcome Back';
-        if (h >= 5 && h < 12) g = 'Good Morning';
-        else if (h >= 12 && h < 17) g = 'Good Afternoon';
-        else if (h >= 17 && h < 21) g = 'Good Evening';
-        document.getElementById('greeting').textContent = g;
+function showPage(p) {
+    ['loginPage','pendingPage'].forEach(id=>{
+        document.getElementById(id).style.display='none';
+        document.getElementById(id).classList.remove('visible');
+    });
+    if (!p) return;
+    const el = document.getElementById(p+'Page');
+    el.style.display = 'block';
+    setTimeout(()=>el.classList.add('visible'),50);
+}
 
-        // ====== INTRO SEQUENCE ======
-        const icon = document.getElementById('introIcon');
-        const line = document.getElementById('introLine');
-        const text = document.getElementById('introText');
-        const intro = document.getElementById('intro');
-        const wrap = document.getElementById('loginWrap');
+async function checkAccess(email) {
+    const { data, error } = await sb.from('approved_emails').select('approved').eq('email',email).single();
+    if (error||!data) return false;
+    return data.approved===true;
+}
 
-        setTimeout(() => icon.classList.add('show'), 300);
-        setTimeout(() => line.classList.add('expand'), 900);
-        setTimeout(() => text.classList.add('show'), 1400);
+async function requestAccess(user) {
+    const { data:ex } = await sb.from('approved_emails').select('email').eq('email',user.email).single();
+    if (!ex) await sb.from('approved_emails').insert({ email:user.email, approved:false, name:user.user_metadata?.full_name||'' });
+}
 
-        // Check if already logged in
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                const loginTime = localStorage.getItem('dbmciLoginTime');
-                if (loginTime && (Date.now() - parseInt(loginTime)) < SESSION_DURATION) {
-                    // Already logged in and within 24h — skip intro, go to dashboard
-                    window.location.href = 'index.html';
-                    return;
-                } else {
-                    // Session expired — sign out
-                    auth.signOut();
-                    localStorage.removeItem('dbmciLoginTime');
-                    localStorage.removeItem('dbmciUserEmail');
-                }
-            }
-            // Show login UI
-            setTimeout(() => intro.classList.add('hide'), 2800);
-            setTimeout(() => wrap.classList.add('visible'), 3400);
-        });
+async function initAuth() {
+    const { data:{ session } } = await sb.auth.getSession();
 
-        // ====== GOOGLE SIGN IN ======
-        window.signInWithGoogle = async function() {
-            const btn = document.getElementById('googleBtn');
-            const errorBox = document.getElementById('errorBox');
-            const errorText = document.getElementById('errorText');
-            const card = document.getElementById('loginCard');
+    if (!session) {
+        setTimeout(()=>document.getElementById('intro').classList.add('hide'),2800);
+        setTimeout(()=>showPage('login'),3400);
+        return;
+    }
 
-            errorBox.classList.remove('show');
-            btn.disabled = true;
-            btn.innerHTML = '<div class="spinner"></div> Signing in...';
+    // 24h check
+    const loginTime = localStorage.getItem('dbmciLoginTime');
+    if (loginTime && (Date.now()-parseInt(loginTime)) >= SESSION_DURATION) {
+        await sb.auth.signOut();
+        localStorage.removeItem('dbmciLoginTime');
+        setTimeout(()=>document.getElementById('intro').classList.add('hide'),2800);
+        setTimeout(()=>showPage('login'),3400);
+        return;
+    }
 
-            try {
-                const result = await signInWithPopup(auth, provider);
-                const user = result.user;
-                const email = user.email;
-                const domain = email.split('@')[1];
+    const approved = await checkAccess(session.user.email);
+    if (approved) {
+        if (!loginTime) localStorage.setItem('dbmciLoginTime', Date.now().toString());
+        window.location.href = 'index.html';
+    } else {
+        await requestAccess(session.user);
+        setTimeout(()=>document.getElementById('intro').classList.add('hide'),2800);
+        setTimeout(()=>showPage('pending'),3400);
+    }
+}
 
-                // Domain check
-                if (!ALLOWED_DOMAINS.includes(domain)) {
-                    await auth.signOut();
-                    throw new Error(`Access denied. ${email} is not authorized for DBMCI One.`);
-                }
+async function signInWithGoogle() {
+    const btn = document.getElementById('googleBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Signing in...';
+    const { error } = await sb.auth.signInWithOAuth({
+        provider:'google',
+        options:{ redirectTo: window.location.origin+window.location.pathname }
+    });
+    if (error) {
+        btn.disabled=false;
+        btn.innerHTML=`<svg class="google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg> Continue with Google`;
+        document.getElementById('errorText').textContent='Sign-in failed: '+error.message;
+        document.getElementById('errorBox').classList.add('show');
+    }
+}
 
-                // Store login time for 24h check
-                localStorage.setItem('dbmciLoginTime', Date.now().toString());
-                localStorage.setItem('dbmciUserEmail', email);
+async function doSignOut() {
+    await sb.auth.signOut();
+    localStorage.removeItem('dbmciLoginTime');
+    showPage('login');
+}
 
-                // Success animation
-                btn.innerHTML = '✓ Authenticated';
-                const successOverlay = document.getElementById('successOverlay');
+// Auth state — handles redirect back from Google
+let handled = false;
+sb.auth.onAuthStateChange(async(event,session)=>{
+    if (event==='SIGNED_IN'&&session&&!handled) {
+        handled=true;
+        window.history.replaceState(null,'',window.location.pathname);
+        const approved = await checkAccess(session.user.email);
+        if (approved) {
+            localStorage.setItem('dbmciLoginTime', Date.now().toString());
+            document.getElementById('intro').classList.add('hide');
+            document.getElementById('successOverlay').classList.add('show');
+            setTimeout(()=>{ window.location.href='index.html'; },1400);
+        } else {
+            await requestAccess(session.user);
+            document.getElementById('intro').classList.add('hide');
+            setTimeout(()=>showPage('pending'),300);
+        }
+    }
+});
 
-                setTimeout(() => {
-                    successOverlay.classList.add('show');
-                    setTimeout(() => {
-                        card.parentElement.classList.add('fly-up');
-                        setTimeout(() => {
-                            window.location.href = 'index.html';
-                        }, 700);
-                    }, 600);
-                }, 400);
-
-            } catch (err) {
-                btn.disabled = false;
-                btn.innerHTML = `
-                    <svg class="google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                    </svg>
-                    Continue with Google`;
-
-                const msg = err.code === 'auth/popup-closed-by-user'
-                    ? 'Sign-in cancelled. Please try again.'
-                    : err.message || 'Sign-in failed. Please try again.';
-
-                errorText.textContent = msg;
-                errorBox.classList.add('show');
-                card.classList.add('shake');
-                setTimeout(() => card.classList.remove('shake'), 500);
-            }
-        };
-    </script>
+initAuth();
+</script>
 </body>
 </html>
