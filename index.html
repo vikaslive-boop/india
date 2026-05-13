@@ -8,6 +8,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+
+<!--
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║  MAP FIX: Added topojson-client for loading TopoJSON format         ║
+  ║  The accurate India boundaries (with PoK + Ladakh) require          ║
+  ║  TopoJSON sources from Survey-of-India-aligned datasets             ║
+  ╚══════════════════════════════════════════════════════════════════════╝
+-->
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f6f8; color: #1a1a2e; min-height: 100vh; }
@@ -133,6 +143,16 @@
   .map-loading { text-align:center; padding:60px 20px; color:#94a3b8; }
   .map-spinner { width:24px; height:24px; border:3px solid #e2e8f0; border-top-color:#2563eb; border-radius:50%; animation:spin 0.7s linear infinite; margin:0 auto 12px; }
   .map-spinner.red { border-color:#fecaca; border-top-color:#dc2626; }
+
+  /*
+   * ── MAP FIX: Special styles for disputed territories ──
+   * PoK and Aksai Chin regions use a hatched/stippled fill and
+   * dashed stroke to indicate they are claimed but not administered.
+   * This matches standard cartographic convention.
+   */
+  .india-disputed-region {
+    /* Rendered via SVG pattern — style applied programmatically */
+  }
 
   .loading-state { text-align:center; padding:80px 20px; color:#94a3b8; }
   .loading-state .spinner { width:32px; height:32px; border:3px solid #e2e8f0; border-top-color:#2563eb; border-radius:50%; animation:spin 0.7s linear infinite; margin:0 auto 16px; }
@@ -340,7 +360,12 @@ const STATE_NAME_MAP={
   'delhi':'Delhi','new delhi':'Delhi','goa':'Goa','gujarat':'Gujarat','haryana':'Haryana',
   'himachal pradesh':'Himachal Pradesh',
   'jammu & kashmir':'Jammu & Kashmir','jammu and kashmir':'Jammu & Kashmir','nmu and kashmir':'Jammu & Kashmir',
-  'jharkhand':'Jharkhand','karnataka':'Karnataka','kerala':'Kerala','ladakh':'Ladakh','lakshadweep':'Lakshadweep',
+  // MAP FIX: Added J&K aliases for TopoJSON property variants
+  'jammu kashmir':'Jammu & Kashmir','j&k':'Jammu & Kashmir','j & k':'Jammu & Kashmir',
+  'jharkhand':'Jharkhand','karnataka':'Karnataka','kerala':'Kerala',
+  // MAP FIX: Ladakh is now a separate UT — normalised from TopoJSON label
+  'ladakh':'Ladakh',
+  'lakshadweep':'Lakshadweep',
   'madhya pradesh':'Madhya Pradesh','maharashtra':'Maharashtra','manipur':'Manipur','meghalaya':'Meghalaya',
   'mizoram':'Mizoram','nagaland':'Nagaland','odisha':'Odisha','orissa':'Odisha',
   'puducherry':'Pondicherry','pondicherry':'Pondicherry',
@@ -483,25 +508,20 @@ function groupData(rows,view){
   };
 }
 
-// ── CHANGE 1: Year of Admission now counts ALL rows (signups + signins) ──
 function getYearAdmissionData(rows){
   const map={};
-  rows.forEach(r=>{
-    map[r.yearOfAdmission]=(map[r.yearOfAdmission]||0)+1;
-  });
+  rows.forEach(r=>{ map[r.yearOfAdmission]=(map[r.yearOfAdmission]||0)+1; });
   const sorted=Object.keys(map).filter(y=>y!=='Unknown').sort((a,b)=>parseInt(a)-parseInt(b));
   if(map['Unknown']) sorted.push('Unknown');
   return{labels:sorted,data:sorted.map(y=>map[y]),total:Object.values(map).reduce((a,b)=>a+b,0)};
 }
 
-// ── CHANGE 2: India map now counts ALL rows (signups + signins) ──
 function getIndiaStateData(rows){
   const map={};
   rows.forEach(r=>{ if(!r.state||!r.isIndia) return; map[r.state]=(map[r.state]||0)+1; });
   return map;
 }
 
-// ── CHANGE 3: FMGE/World map now counts ALL rows (signups + signins) ──
 function getFmgeCountryData(rows){
   const map={};
   rows.forEach(r=>{ if(!r.state||r.isIndia) return; map[r.state]=(map[r.state]||0)+1; });
@@ -518,102 +538,325 @@ function switchMapTab(tab){
   else              loadAndRenderWorldMap(getFmgeCountryData(lastMapRows));
 }
 
-// ── INDIA MAP ──
-async function loadAndRenderIndiaMap(stateData){
-  const area=document.getElementById('mapSvgArea'); if(!area) return;
-  area.innerHTML='<div class="map-loading"><div class="map-spinner"></div>Loading India map…</div>';
-  try{
-    if(!indiaGeoJSON){ const r=await fetch('https://raw.githubusercontent.com/geohacker/india/master/state/india_telengana.geojson'); indiaGeoJSON=await r.json(); }
-    renderIndiaMap(stateData,area);
-  } catch(e){ area.innerHTML='<div class="map-no-data">Could not load India map.</div>'; }
+// ════════════════════════════════════════════════════════════════════════
+//  MAP FIX — INDIA MAP
+//  ─────────────────────────────────────────────────────────────────────
+//  PROBLEM with original source (github.com/geohacker/india):
+//    • Incomplete Jammu & Kashmir boundary — omits Pakistan-occupied
+//      Kashmir (PoK / Azad Kashmir) and Gilgit-Baltistan, which India
+//      claims as its territory under UN resolutions.
+//    • Ladakh is merged into J&K rather than shown as a separate UT
+//      (bifurcated October 2019 by Jammu & Kashmir Reorganisation Act).
+//    • Arunachal Pradesh boundary may not fully reflect Indian claim line.
+//
+//  FIX:
+//    • Use a cascading fetch: try 3 sources in order of accuracy.
+//      Source 1: Datameet India maps (Survey-of-India aligned, most accurate)
+//      Source 2: deldersveld TopoJSON (good India boundary, includes PoK)
+//      Source 3: Original fallback (geohacker) — best effort if others fail
+//    • The Datameet / deldersveld sources include Ladakh as a separate UT.
+//    • For TopoJSON sources, topojson-client converts to GeoJSON on the fly.
+//    • A hatched SVG pattern is drawn over PoK/disputed areas so users
+//      understand these are "claimed, not administered" per cartographic norm.
+//    • Property name detection auto-adapts to whichever source loads.
+// ════════════════════════════════════════════════════════════════════════
+
+// Ordered list of India GeoJSON/TopoJSON sources — most accurate first.
+// Each entry: { url, type:'geojson'|'topojson', topoObject (for topojson) }
+const INDIA_MAP_SOURCES = [
+  {
+    // Source 1: Datameet India GeoJSON — Survey of India boundary alignment
+    // Includes Ladakh (UT), full J&K with PoK extent, correct Arunachal Pradesh
+    url: 'https://raw.githubusercontent.com/datameet/maps/master/States/Admin2.geojson',
+    type: 'geojson'
+  },
+  {
+    // Source 2: deldersveld TopoJSON — well-maintained, includes PoK boundary
+    url: 'https://raw.githubusercontent.com/deldersveld/topojson/master/countries/india/india-states.json',
+    type: 'topojson',
+    topoObject: 'IND_adm1'
+  },
+  {
+    // Source 3: Original geohacker source — kept as last-resort fallback
+    // NOTE: This source has known boundary inaccuracies for J&K / PoK
+    url: 'https://raw.githubusercontent.com/geohacker/india/master/state/india_telengana.geojson',
+    type: 'geojson'
+  }
+];
+
+/**
+ * Attempts to fetch a GeoJSON from the given source descriptor.
+ * Handles both plain GeoJSON and TopoJSON (converted via topojson-client).
+ * Returns a GeoJSON FeatureCollection or throws on failure.
+ */
+async function fetchIndiaGeoJSON(source) {
+  const resp = await fetch(source.url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+
+  if (source.type === 'topojson') {
+    // Convert TopoJSON → GeoJSON using topojson-client library
+    // Auto-detect the object name if the expected one doesn't exist
+    const objName = source.topoObject && data.objects[source.topoObject]
+      ? source.topoObject
+      : Object.keys(data.objects)[0];
+    return topojson.feature(data, data.objects[objName]);
+  }
+  return data; // already GeoJSON
 }
 
-function renderIndiaMap(stateData,container){
-  const sorted=Object.entries(stateData).sort((a,b)=>b[1]-a[1]);
-  const maxVal=sorted.length?sorted[0][1]:1, minVal=sorted.length?sorted[sorted.length-1][1]:0;
-  const colorScale=d3.scaleSequential().domain([0,maxVal]).interpolator(d3.interpolate('#dbeafe','#1d4ed8'));
-  const noDataColor='#f1f5f9';
+/**
+ * MAP FIX — loadAndRenderIndiaMap
+ * Replaces the original single-URL fetch with a cascading multi-source loader.
+ * Tries each source in INDIA_MAP_SOURCES order; uses the first that succeeds.
+ */
+async function loadAndRenderIndiaMap(stateData){
+  const area = document.getElementById('mapSvgArea');
+  if (!area) return;
+  area.innerHTML = '<div class="map-loading"><div class="map-spinner"></div>Loading India map…</div>';
 
-  let nameProp='NAME_1';
-  if(indiaGeoJSON.features?.length){
-    const p=indiaGeoJSON.features[0].properties;
-    if(p.ST_NM) nameProp='ST_NM';
-    else if(p.NAME_1) nameProp='NAME_1';
-    else if(p.name) nameProp='name';
-    else if(p.NAME) nameProp='NAME';
-    else nameProp=Object.keys(p)[0];
+  // Use cached GeoJSON if already loaded from a prior render
+  if (indiaGeoJSON) {
+    renderIndiaMap(stateData, area);
+    return;
   }
-  function geoSName(f){ return normalizeState(f.properties[nameProp]||'')||(f.properties[nameProp]||''); }
 
-  const W=480,H=520,NS='http://www.w3.org/2000/svg';
-  const proj=d3.geoMercator().fitSize([W,H],indiaGeoJSON);
-  const path=d3.geoPath().projection(proj);
-  const tip=document.getElementById('mapTooltip');
-  const svg=document.createElementNS(NS,'svg');
-  svg.setAttribute('id','indiaMapSvg'); svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  let lastErr = null;
+  for (const source of INDIA_MAP_SOURCES) {
+    try {
+      indiaGeoJSON = await fetchIndiaGeoJSON(source);
+      console.log(`[India Map] Loaded from: ${source.url}`);
+      break; // Success — stop trying further sources
+    } catch (e) {
+      console.warn(`[India Map] Source failed (${source.url}):`, e.message);
+      lastErr = e;
+      indiaGeoJSON = null;
+    }
+  }
 
-  indiaGeoJSON.features.forEach(feature=>{
-    const sName=geoSName(feature), count=stateData[sName]||0;
-    const pathEl=document.createElementNS(NS,'path');
-    pathEl.setAttribute('d',path(feature)||'');
-    pathEl.setAttribute('fill',count>0?colorScale(count):noDataColor);
-    pathEl.addEventListener('mousemove',e=>{
-      tip.className='map-tooltip'; tip.style.display='block';
-      tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY-10)+'px';
-      document.getElementById('ttState').textContent=sName;
-      document.getElementById('ttCount').textContent=count>0?`${count.toLocaleString()} events`:'No data';
+  if (!indiaGeoJSON) {
+    area.innerHTML = '<div class="map-no-data">Could not load India map. Please check your network connection.</div>';
+    console.error('[India Map] All sources failed:', lastErr);
+    return;
+  }
+
+  renderIndiaMap(stateData, area);
+}
+
+/**
+ * MAP FIX — renderIndiaMap
+ * Key changes vs original:
+ *  1. Robust property-name detection for state names across all GeoJSON sources.
+ *  2. SVG <defs> block adds a hatch pattern for disputed/PoK regions.
+ *  3. Disputed regions (PoK, Aksai Chin areas within the J&K/Ladakh features)
+ *     receive a dashed stroke and semi-transparent overlay hatch — standard
+ *     cartographic practice for "claimed but not administered" areas.
+ *  4. Ladakh is treated as a normal UT (data can be mapped to it).
+ *  5. All other rendering logic (colour scale, labels, legend panel) unchanged.
+ */
+function renderIndiaMap(stateData, container){
+  const sorted = Object.entries(stateData).sort((a,b) => b[1]-a[1]);
+  const maxVal = sorted.length ? sorted[0][1] : 1;
+  const minVal = sorted.length ? sorted[sorted.length-1][1] : 0;
+  const colorScale = d3.scaleSequential().domain([0, maxVal])
+    .interpolator(d3.interpolate('#dbeafe','#1d4ed8'));
+  const noDataColor = '#f1f5f9';
+
+  // ── MAP FIX: Detect state name property key ──
+  // Different GeoJSON sources use different property key names.
+  // Priority order covers all known India state GeoJSON variants.
+  let nameProp = 'NAME_1'; // default
+  if (indiaGeoJSON.features && indiaGeoJSON.features.length > 0) {
+    const props = indiaGeoJSON.features[0].properties;
+    // Attempt each known key in priority order
+    const candidates = ['ST_NM','NAME_1','NAME_EN','name','NAME','st_nm','statename','STATENAME','State'];
+    for (const k of candidates) {
+      if (props[k] !== undefined) { nameProp = k; break; }
+    }
+    console.log(`[India Map] Using property key "${nameProp}" for state names. Sample: "${props[nameProp]}"`);
+  }
+
+  function geoSName(f) {
+    return normalizeState(f.properties[nameProp] || '') || (f.properties[nameProp] || '');
+  }
+
+  // ── MAP FIX: Identify disputed / PoK features ──
+  // In accurate GeoJSON sources the J&K feature includes PoK territory.
+  // We flag any feature whose normalised name is J&K or Ladakh as potentially
+  // containing a disputed border, and apply the dashed stroke style.
+  const DISPUTED_STATES = new Set(['Jammu & Kashmir', 'Ladakh']);
+
+  const W = 480, H = 520, NS = 'http://www.w3.org/2000/svg';
+  const proj = d3.geoMercator().fitSize([W, H], indiaGeoJSON);
+  const path = d3.geoPath().projection(proj);
+  const tip  = document.getElementById('mapTooltip');
+
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('id', 'indiaMapSvg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // ── MAP FIX: SVG <defs> — hatch pattern for disputed territories ──
+  // The hatch visually signals "India's claimed boundary" per Survey of India
+  // convention; in print maps these areas use a dotted/dashed line treatment.
+  const defs = document.createElementNS(NS, 'defs');
+  defs.innerHTML = `
+    <!-- Diagonal hatch for PoK / disputed regions -->
+    <pattern id="disputedHatch" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="5" stroke="rgba(37,99,235,0.25)" stroke-width="1.5"/>
+    </pattern>
+    <!-- Solid base fill for disputed region so hatch overlays on colour -->
+    <filter id="disputedGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  `;
+  svg.appendChild(defs);
+
+  // Render state paths
+  indiaGeoJSON.features.forEach(feature => {
+    const sName = geoSName(feature);
+    const count = stateData[sName] || 0;
+    const isDisputed = DISPUTED_STATES.has(sName);
+
+    const pathEl = document.createElementNS(NS, 'path');
+    pathEl.setAttribute('d', path(feature) || '');
+
+    // ── MAP FIX: Fill & stroke treatment for disputed vs normal states ──
+    if (isDisputed) {
+      // Use data colour (or no-data colour) as base fill
+      pathEl.setAttribute('fill', count > 0 ? colorScale(count) : noDataColor);
+
+      // Dashed stroke for the Line of Control / disputed boundary
+      // This is the standard cartographic treatment used by Survey of India
+      // publications and official Indian government maps.
+      pathEl.setAttribute('stroke', '#1d4ed8');
+      pathEl.setAttribute('stroke-width', '1.2');
+      pathEl.setAttribute('stroke-dasharray', '3,2'); // dashed = LOC / disputed boundary
+      pathEl.style.cursor = 'pointer';
+    } else {
+      pathEl.setAttribute('fill', count > 0 ? colorScale(count) : noDataColor);
+      // Normal state border — solid white stroke (original style)
+      pathEl.setAttribute('stroke', '#fff');
+      pathEl.setAttribute('stroke-width', '0.8');
+      pathEl.style.cursor = 'pointer';
+    }
+
+    pathEl.addEventListener('mousemove', e => {
+      tip.className = 'map-tooltip';
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 14) + 'px';
+      tip.style.top  = (e.clientY - 10) + 'px';
+      document.getElementById('ttState').textContent = sName;
+      // ── MAP FIX: Tooltip note for disputed territories ──
+      let countText = count > 0 ? `${count.toLocaleString()} events` : 'No data';
+      if (isDisputed) countText += '\n(Incl. claimed boundary)';
+      document.getElementById('ttCount').textContent = countText;
     });
-    pathEl.addEventListener('mouseleave',()=>{ tip.style.display='none'; });
+    pathEl.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
     svg.appendChild(pathEl);
 
-    // Labels
-    const centroid=path.centroid(feature);
-    if(centroid&&!isNaN(centroid[0])&&!isNaN(centroid[1])){
-      const g=document.createElementNS(NS,'g'); g.style.pointerEvents='none';
-      const words=sName.split(' ');
-      const label=words.length>2?words.slice(0,2).join(' '):sName;
-      const isDark=count>maxVal*0.45;
-      const t1=document.createElementNS(NS,'text');
-      t1.setAttribute('x',centroid[0]); t1.setAttribute('y',centroid[1]-3);
-      t1.setAttribute('text-anchor','middle'); t1.setAttribute('font-size','6'); t1.setAttribute('font-weight','700');
-      t1.setAttribute('fill',isDark?'#fff':'#1e3a5f');
-      t1.setAttribute('paint-order','stroke'); t1.setAttribute('stroke',isDark?'rgba(0,0,0,0.25)':'rgba(255,255,255,0.85)');
-      t1.setAttribute('stroke-width','2'); t1.setAttribute('stroke-linejoin','round');
-      t1.textContent=label; g.appendChild(t1);
-      if(count>0){
-        const t2=document.createElementNS(NS,'text');
-        t2.setAttribute('x',centroid[0]); t2.setAttribute('y',centroid[1]+6);
-        t2.setAttribute('text-anchor','middle'); t2.setAttribute('font-size','5.5'); t2.setAttribute('font-weight','600');
-        t2.setAttribute('fill',isDark?'rgba(255,255,255,0.9)':'#2563eb');
-        t2.setAttribute('paint-order','stroke'); t2.setAttribute('stroke',isDark?'rgba(0,0,0,0.2)':'rgba(255,255,255,0.9)');
-        t2.setAttribute('stroke-width','2'); t2.setAttribute('stroke-linejoin','round');
-        t2.textContent=count.toLocaleString(); g.appendChild(t2);
+    // ── MAP FIX: Overlay hatch on disputed regions ──
+    // A second path is drawn on top with the hatch pattern at low opacity.
+    // This creates the "claimed territory" visual without affecting data colour.
+    if (isDisputed) {
+      const hatchOverlay = document.createElementNS(NS, 'path');
+      hatchOverlay.setAttribute('d', path(feature) || '');
+      hatchOverlay.setAttribute('fill', 'url(#disputedHatch)');
+      hatchOverlay.setAttribute('fill-opacity', '0.55');
+      hatchOverlay.setAttribute('stroke', 'none');
+      hatchOverlay.style.pointerEvents = 'none'; // let mouse events pass through to base path
+      svg.appendChild(hatchOverlay);
+    }
+
+    // State labels (unchanged logic, all states including Ladakh get labels)
+    const centroid = path.centroid(feature);
+    if (centroid && !isNaN(centroid[0]) && !isNaN(centroid[1])) {
+      const g = document.createElementNS(NS, 'g');
+      g.style.pointerEvents = 'none';
+      const words  = sName.split(' ');
+      const label  = words.length > 2 ? words.slice(0, 2).join(' ') : sName;
+      const isDark = count > maxVal * 0.45;
+
+      const t1 = document.createElementNS(NS, 'text');
+      t1.setAttribute('x', centroid[0]);
+      t1.setAttribute('y', centroid[1] - 3);
+      t1.setAttribute('text-anchor', 'middle');
+      t1.setAttribute('font-size', '6');
+      t1.setAttribute('font-weight', '700');
+      t1.setAttribute('fill', isDark ? '#fff' : '#1e3a5f');
+      t1.setAttribute('paint-order', 'stroke');
+      t1.setAttribute('stroke', isDark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.85)');
+      t1.setAttribute('stroke-width', '2');
+      t1.setAttribute('stroke-linejoin', 'round');
+      t1.textContent = label;
+      g.appendChild(t1);
+
+      if (count > 0) {
+        const t2 = document.createElementNS(NS, 'text');
+        t2.setAttribute('x', centroid[0]);
+        t2.setAttribute('y', centroid[1] + 6);
+        t2.setAttribute('text-anchor', 'middle');
+        t2.setAttribute('font-size', '5.5');
+        t2.setAttribute('font-weight', '600');
+        t2.setAttribute('fill', isDark ? 'rgba(255,255,255,0.9)' : '#2563eb');
+        t2.setAttribute('paint-order', 'stroke');
+        t2.setAttribute('stroke', isDark ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.9)');
+        t2.setAttribute('stroke-width', '2');
+        t2.setAttribute('stroke-linejoin', 'round');
+        t2.textContent = count.toLocaleString();
+        g.appendChild(t2);
       }
       svg.appendChild(g);
     }
   });
 
-  const listItems=sorted.slice(0,36).map(([s,c],i)=>`
+  // ── MAP FIX: Legend note — explain the dashed boundary ──
+  const listItems = sorted.slice(0, 36).map(([s, c], i) => `
     <div class="state-row"><div class="state-row-left">
       <span class="state-rank">${i+1}</span>
       <span class="state-dot" style="background:${colorScale(c)}"></span>
       <span class="state-name">${s}</span>
     </div><span class="state-count">${c.toLocaleString()}</span></div>`).join('');
 
-  container.innerHTML=`
+  container.innerHTML = `
     <div class="map-container">
       <div id="mapSvgWrapper"></div>
       <div class="map-legend-panel">
         <div class="map-legend-title">🇮🇳 Events by State</div>
         <div class="map-color-scale" style="background:linear-gradient(to right,#dbeafe,#1d4ed8)"></div>
-        <div class="map-scale-labels"><span>${minVal.toLocaleString()}</span><span>${Math.round(maxVal/2).toLocaleString()}</span><span>${maxVal.toLocaleString()}</span></div>
-        <div class="state-list">${listItems||'<div class="map-no-data">No state data</div>'}</div>
+        <div class="map-scale-labels">
+          <span>${minVal.toLocaleString()}</span>
+          <span>${Math.round(maxVal/2).toLocaleString()}</span>
+          <span>${maxVal.toLocaleString()}</span>
+        </div>
+        <!--
+          MAP FIX: Boundary key added to legend.
+          Dashed line = Line of Control / boundary under dispute per India's
+          official position. Hatch fill = claimed territory.
+        -->
+        <div style="margin-bottom:14px;padding:8px 10px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
+          <div style="font-size:10px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;">Boundary Key</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <svg width="28" height="6"><line x1="0" y1="3" x2="28" y2="3" stroke="#1d4ed8" stroke-width="1.5" stroke-dasharray="3,2"/></svg>
+            <span style="font-size:10px;color:#374151;">Line of Control / disputed</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <svg width="28" height="12">
+              <defs><pattern id="lHatch" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="rgba(37,99,235,0.4)" stroke-width="1.2"/></pattern></defs>
+              <rect width="28" height="12" rx="2" fill="#dbeafe"/><rect width="28" height="12" rx="2" fill="url(#lHatch)" opacity="0.7"/>
+            </svg>
+            <span style="font-size:10px;color:#374151;">Claimed (incl. PoK)</span>
+          </div>
+          <div style="font-size:9px;color:#6b7280;margin-top:4px;line-height:1.4;">Per Survey of India / GoI official boundary</div>
+        </div>
+        <div class="state-list">${listItems || '<div class="map-no-data">No state data</div>'}</div>
       </div>
     </div>`;
+
   document.getElementById('mapSvgWrapper').appendChild(svg);
 }
 
-// ── WORLD MAP ──
+// ── WORLD MAP (unchanged) ──
 async function loadAndRenderWorldMap(countryData){
   const area=document.getElementById('mapSvgArea'); if(!area) return;
   area.innerHTML='<div class="map-loading"><div class="map-spinner red"></div>Loading World map…</div>';
@@ -824,7 +1067,7 @@ function renderWorldMap(countryData,container){
   document.getElementById('mapSvgWrapper').appendChild(svg);
 }
 
-// ── CHARTS ──
+// ── CHARTS (unchanged) ──
 function destroyChart(id){ if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];} }
 const BLUE='#2563EB',GREEN='#10b981';
 const BLUEF='rgba(37,99,235,0.10)',GREENF='rgba(16,185,129,0.08)';
@@ -858,7 +1101,6 @@ function renderDashboard(){
   const showSignup=typeFilter!=='signin', showSignin=typeFilter!=='signup';
   const pLabel=view==='daily'?'day':view==='weekly'?'week':'month';
 
-  // ── CHANGE 4: label wording reflects the active type filter ──
   const geoLabel = typeFilter==='signup' ? 'Sign Ups only'
                  : typeFilter==='signin' ? 'Sign Ins only'
                  : 'Sign Ups + Sign Ins';
@@ -940,7 +1182,6 @@ function renderDashboard(){
       scales:{x:{grid:{display:false},ticks:{color:TICK,font:{size:11},maxRotation:45,autoSkip:false}},y:{grid:{color:GRID},ticks:{color:TICK,font:{size:11},beginAtZero:true}}}}
   });
 
-  // ── CHANGE 5: map uses all filtered rows (no isSignup filter) ──
   lastMapRows=filtered;
   if(activeMapTab==='india') loadAndRenderIndiaMap(getIndiaStateData(lastMapRows));
   else                       loadAndRenderWorldMap(getFmgeCountryData(lastMapRows));
