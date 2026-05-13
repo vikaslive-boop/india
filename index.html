@@ -565,20 +565,13 @@ function switchMapTab(tab){
 // Each entry: { url, type:'geojson'|'topojson', topoObject (for topojson) }
 const INDIA_MAP_SOURCES = [
   {
-    // Source 1: Datameet India GeoJSON — Survey of India boundary alignment
-    // Includes Ladakh (UT), full J&K with PoK extent, correct Arunachal Pradesh
-    url: 'https://raw.githubusercontent.com/datameet/maps/master/States/Admin2.geojson',
+    // Source 1: Local file — accurate India boundary with full J&K (PoK) + Ladakh
+    // Place Indian_States.geojson in the same folder as this HTML file
+    url: 'Indian_States.geojson',
     type: 'geojson'
   },
   {
-    // Source 2: deldersveld TopoJSON — well-maintained, includes PoK boundary
-    url: 'https://raw.githubusercontent.com/deldersveld/topojson/master/countries/india/india-states.json',
-    type: 'topojson',
-    topoObject: 'IND_adm1'
-  },
-  {
-    // Source 3: Original geohacker source — kept as last-resort fallback
-    // NOTE: This source has known boundary inaccuracies for J&K / PoK
+    // Source 2: Original geohacker source — fallback if local file is missing
     url: 'https://raw.githubusercontent.com/geohacker/india/master/state/india_telengana.geojson',
     type: 'geojson'
   }
