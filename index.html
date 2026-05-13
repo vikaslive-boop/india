@@ -523,7 +523,12 @@ async function loadAndRenderIndiaMap(stateData){
   const area=document.getElementById('mapSvgArea'); if(!area) return;
   area.innerHTML='<div class="map-loading"><div class="map-spinner"></div>Loading India map…</div>';
   try{
-    if(!indiaGeoJSON){ const r=await fetch('https://raw.githubusercontent.com/geohacker/india/master/state/india_telengana.geojson'); indiaGeoJSON=await r.json(); }
+   if(!indiaGeoJSON){
+  const r = await fetch(
+    'https://raw.githubusercontent.com/iamspruce/intro-d3/main/data/india.geojson'
+  );
+  indiaGeoJSON = await r.json();
+}
     renderIndiaMap(stateData,area);
   } catch(e){ area.innerHTML='<div class="map-no-data">Could not load India map.</div>'; }
 }
