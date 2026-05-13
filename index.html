@@ -525,7 +525,7 @@ async function loadAndRenderIndiaMap(stateData){
   try{
    if(!indiaGeoJSON){
   const r = await fetch(
-    'https://raw.githubusercontent.com/iamspruce/intro-d3/main/data/india.geojson'
+    'https://raw.githubusercontent.com/geohacker/india/master/state/india.geojson'
   );
   indiaGeoJSON = await r.json();
 }
