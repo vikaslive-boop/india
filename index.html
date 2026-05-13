@@ -525,8 +525,9 @@ async function loadAndRenderIndiaMap(stateData){
   try{
    if(!indiaGeoJSON){
   const r = await fetch(
-    'https://raw.githubusercontent.com/geohacker/india/master/state/india.geojson'
+    'https://raw.githubusercontent.com/geohacker/india/master/state/india_state.geojson'
   );
+
   indiaGeoJSON = await r.json();
 }
     renderIndiaMap(stateData,area);
@@ -539,15 +540,16 @@ function renderIndiaMap(stateData,container){
   const colorScale=d3.scaleSequential().domain([0,maxVal]).interpolator(d3.interpolate('#dbeafe','#1d4ed8'));
   const noDataColor='#f1f5f9';
 
-  let nameProp='NAME_1';
-  if(indiaGeoJSON.features?.length){
-    const p=indiaGeoJSON.features[0].properties;
-    if(p.ST_NM) nameProp='ST_NM';
-    else if(p.NAME_1) nameProp='NAME_1';
-    else if(p.name) nameProp='name';
-    else if(p.NAME) nameProp='NAME';
-    else nameProp=Object.keys(p)[0];
-  }
+  let nameProp = 'NAME_1';
+
+if(indiaGeoJSON.features?.length){
+  const p = indiaGeoJSON.features[0].properties;
+
+  if(p.ST_NM) nameProp = 'ST_NM';
+  else if(p.NAME_1) nameProp = 'NAME_1';
+  else if(p.NAME) nameProp = 'NAME';
+  else if(p.name) nameProp = 'name';
+}
   function geoSName(f){ return normalizeState(f.properties[nameProp]||'')||(f.properties[nameProp]||''); }
 
   const W=480,H=520,NS='http://www.w3.org/2000/svg';
